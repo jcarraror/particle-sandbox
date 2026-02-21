@@ -1,8 +1,20 @@
+/**
+ * @file world.cpp
+ * @brief Simulation rules and world update implementation.
+ */
+
 #include "world.hpp"
 
 #include <algorithm>
 #include <cmath>
 
+/**
+ * @brief Clamps an integer to an inclusive range.
+ * @param v Value to clamp.
+ * @param lo Lower bound.
+ * @param hi Upper bound.
+ * @return Clamped value.
+ */
 static constexpr int clampi(int v, int lo, int hi) {
   return (v < lo) ? lo : (v > hi ? hi : v);
 }
@@ -16,7 +28,6 @@ std::expected<World, std::string> World::create(int width, int height, std::uint
   wld.cells.assign(static_cast<std::size_t>(width * height), Cell{});
   wld.rng = XorShift32(seed);
 
-  // Border walls
   for (int x = 0; x < width; ++x) {
     wld.at(x, 0).type = CellType::Wall;
     wld.at(x, height - 1).type = CellType::Wall;
@@ -63,7 +74,6 @@ bool World::try_move(int x, int y, int nx, int ny) {
 
   std::swap(a, b);
 
-  // The moved-into cell should be considered updated for this stamp
   b.updated = stamp;
   return true;
 }
@@ -110,7 +120,6 @@ void World::tick() {
 
   const bool left_to_right = (rng.next_u32() & 1u) != 0;
 
-  // Falling behavior: scan bottom-up
   for (int y = h - 2; y >= 1; --y) {
     if (left_to_right) {
       for (int x = 1; x < w - 1; ++x) step_cell(x, y, true);
@@ -119,7 +128,6 @@ void World::tick() {
     }
   }
 
-  // Cooling toward ambient (simple)
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
       Cell& c = at(x, y);
@@ -138,12 +146,12 @@ void World::step_cell(int x, int y, bool left_to_right) {
   c.updated = stamp;
 
   switch (c.type) {
-    case CellType::Sand:  step_sand(x, y, left_to_right); break;
+    case CellType::Sand: step_sand(x, y, left_to_right); break;
     case CellType::Water: step_water(x, y, left_to_right); break;
-    case CellType::Oil:   step_oil(x, y, left_to_right); break;
+    case CellType::Oil: step_oil(x, y, left_to_right); break;
     case CellType::Smoke: step_smoke(x, y, left_to_right); break;
-    case CellType::Fire:  step_fire(x, y); break;
-    case CellType::Lava:  step_lava(x, y, left_to_right); break;
+    case CellType::Fire: step_fire(x, y); break;
+    case CellType::Lava: step_lava(x, y, left_to_right); break;
     default: break;
   }
 }
@@ -226,7 +234,6 @@ void World::step_fire(int x, int y) {
   c.temp = static_cast<std::int16_t>(clampi(c.temp + 5, 20, 1200));
   heat_neighbors(x, y, 3);
 
-  // Ignite oil neighbors
   for (int oy = -1; oy <= 1; ++oy) {
     for (int ox = -1; ox <= 1; ++ox) {
       const int nx = x + ox;
@@ -242,7 +249,6 @@ void World::step_fire(int x, int y) {
     }
   }
 
-  // Decay
   const std::uint32_t r = rng.next_u32();
   if ((r % 25u) == 0u) {
     c.type = CellType::Smoke;

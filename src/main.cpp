@@ -1,3 +1,8 @@
+/**
+ * @file main.cpp
+ * @brief Application entry point and interactive event loop.
+ */
+
 #include <SDL.h>
 
 #include <algorithm>
@@ -9,11 +14,20 @@
 #include "render_sdl.hpp"
 #include "world.hpp"
 
+/**
+ * @brief Prints a fatal error and terminates the process.
+ * @param msg Message to display.
+ */
 static void fatal(const std::string& msg) {
   std::cerr << msg << "\n";
   std::exit(1);
 }
 
+/**
+ * @brief Converts a material type to a short UI label.
+ * @param t Material enum value.
+ * @return Name shown in the window title.
+ */
 static const char* material_name(CellType t) {
   switch (t) {
     case CellType::Sand: return "Sand";
@@ -28,6 +42,13 @@ static const char* material_name(CellType t) {
   }
 }
 
+/**
+ * @brief Updates window title with brush and pause state.
+ * @param ren Active SDL renderer wrapper.
+ * @param brush Selected brush material.
+ * @param radius Current brush radius.
+ * @param paused Simulation paused flag.
+ */
 static void update_title(RendererSDL& ren, CellType brush, int radius, bool paused) {
   std::string title = "Particle Sandbox | ";
   title += material_name(brush);
@@ -37,6 +58,10 @@ static void update_title(RendererSDL& ren, CellType brush, int radius, bool paus
   ren.set_title(title);
 }
 
+/**
+ * @brief Runs the particle sandbox application.
+ * @return Process exit code.
+ */
 int main(int, char**) {
   constexpr int W = 220;
   constexpr int H = 160;
@@ -76,16 +101,16 @@ int main(int, char**) {
       if (e.type == SDL_KEYDOWN) {
         switch (e.key.keysym.sym) {
           case SDLK_ESCAPE: running = false; break;
-          case SDLK_SPACE:  paused = !paused; update_title(ren, brush, brush_radius, paused); break;
-          case SDLK_c:      world.clear(); break;
+          case SDLK_SPACE: paused = !paused; update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_c: world.clear(); break;
 
-          case SDLK_1: brush = CellType::Sand;  update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_1: brush = CellType::Sand; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_2: brush = CellType::Water; update_title(ren, brush, brush_radius, paused); break;
-          case SDLK_3: brush = CellType::Oil;   update_title(ren, brush, brush_radius, paused); break;
-          case SDLK_4: brush = CellType::Fire;  update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_3: brush = CellType::Oil; update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_4: brush = CellType::Fire; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_5: brush = CellType::Smoke; update_title(ren, brush, brush_radius, paused); break;
-          case SDLK_6: brush = CellType::Lava;  update_title(ren, brush, brush_radius, paused); break;
-          case SDLK_7: brush = CellType::Wall;  update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_6: brush = CellType::Lava; update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_7: brush = CellType::Wall; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_0: brush = CellType::Empty; update_title(ren, brush, brush_radius, paused); break;
 
           case SDLK_MINUS:
@@ -109,7 +134,6 @@ int main(int, char**) {
         mx = e.button.x;
         my = e.button.y;
 
-        // icon click selects material
         if (auto hit = ren.hit_test_toolbar(mx, my)) {
           brush = *hit;
           update_title(ren, brush, brush_radius, paused);
@@ -117,7 +141,6 @@ int main(int, char**) {
       }
     }
 
-    // painting (only if mouse is in grid, not toolbar)
     int gx = 0, gy = 0;
     const bool in_grid = ren.mouse_to_grid(mx, my, gx, gy);
 
@@ -142,7 +165,6 @@ int main(int, char**) {
 
     if (!paused) world.tick();
 
-    // render with hover info
     ren.draw(world, brush, brush_radius, mx, my, paused);
   }
 
