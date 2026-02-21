@@ -205,6 +205,21 @@ static SDL_Rect toolbar_button_rect(int index, int toolbar_h) {
 }
 
 /**
+ * @brief Computes the rectangle for the toolbar clear button.
+ * @param win_w Window width in pixels.
+ * @param toolbar_h Toolbar height in pixels.
+ * @return Screen-space clear button rectangle.
+ */
+static SDL_Rect clear_button_rect(int win_w, int toolbar_h) {
+  const int pad = 12;
+  const int size = toolbar_h - 24;
+  const int width = 124;
+  const int x = win_w - pad - width;
+  const int y = 12;
+  return SDL_Rect{x, y, width, size};
+}
+
+/**
  * @brief Draws a symbolic icon inside a toolbar button.
  * @param r SDL renderer.
  * @param b Target button rectangle.
@@ -350,6 +365,12 @@ std::optional<CellType> RendererSDL::hit_test_toolbar(int mx, int my) const {
   return std::nullopt;
 }
 
+bool RendererSDL::hit_test_clear_button(int mx, int my) const {
+  if (my < 0 || my >= toolbar_h) return false;
+  const SDL_Rect b = clear_button_rect(win_w, toolbar_h);
+  return mx >= b.x && mx < (b.x + b.w) && my >= b.y && my < (b.y + b.h);
+}
+
 /**
  * @brief Converts material enum value into toolbar display text.
  * @param t Material type.
@@ -393,10 +414,13 @@ void RendererSDL::draw(const World& world,
   SDL_RenderDrawLine(renderer, 0, toolbar_h - 1, win_w, toolbar_h - 1);
 
   std::optional<CellType> hovered = hit_test_toolbar(mouse_x, mouse_y);
+  const bool clear_hovered = hit_test_clear_button(mouse_x, mouse_y);
 
   const auto mats = materials();
+  int tools_right = 12;
   for (int i = 0; i < static_cast<int>(mats.size()); ++i) {
     SDL_Rect b = toolbar_button_rect(i, toolbar_h);
+    tools_right = std::max(tools_right, b.x + b.w);
 
     const bool is_sel = (mats[i].type == selected);
     const bool is_hover = hovered.has_value() && hovered.value() == mats[i].type;
@@ -418,20 +442,49 @@ void RendererSDL::draw(const World& world,
     draw_icon(renderer, b, mats[i].type, argb(255, 220, 220, 230));
   }
 
+  // Draw clear/reset button on the right side of the toolbar.
+  const SDL_Rect clear_btn = clear_button_rect(win_w, toolbar_h);
+  const std::uint32_t clear_bg = clear_hovered ? argb(255, 88, 44, 44) : argb(255, 64, 32, 32);
+  set_draw_color(renderer, clear_bg);
+  SDL_RenderFillRect(renderer, &clear_btn);
+  SDL_Rect clear_top{clear_btn.x + 1, clear_btn.y + 1, clear_btn.w - 2, 8};
+  set_draw_color(renderer, clear_hovered ? argb(255, 125, 64, 64) : argb(255, 96, 48, 48));
+  SDL_RenderFillRect(renderer, &clear_top);
+  set_draw_color(renderer, argb(255, 185, 105, 105));
+  SDL_RenderDrawRect(renderer, &clear_btn);
+  draw_text(renderer, clear_btn.x + 18, clear_btn.y + 12, "RESET", 2, argb(255, 244, 226, 226));
+
   std::string hover_text;
-  if (hovered.has_value()) {
+  if (clear_hovered) {
+    hover_text = "RESET WORLD [C]";
+  } else if (hovered.has_value()) {
     for (const auto& m : mats) {
       if (m.type == hovered.value()) {
-        hover_text = std::string(m.name) + " " + m.hotkey;
+        hover_text = std::string("TOOL: ") + m.name + " " + m.hotkey;
         break;
       }
     }
   } else {
-    hover_text = mat_name(selected) + "  R:" + std::to_string(brush_radius) + (paused ? "  [PAUSED]" : "");
+    hover_text = "ACTIVE: " + mat_name(selected) + "  BRUSH " + std::to_string(brush_radius) +
+                 (paused ? "  [PAUSED]" : "");
   }
 
-  draw_text(renderer, win_w - static_cast<int>(hover_text.size()) * 12 - 12,
-            18, hover_text, 2, argb(255, 220, 220, 230));
+  const int panel_x = tools_right + 16;
+  const int panel_w = std::max(120, clear_btn.x - 16 - panel_x);
+  SDL_Rect status_panel{panel_x, 12, panel_w, toolbar_h - 24};
+  set_draw_color(renderer, argb(255, 22, 24, 30));
+  SDL_RenderFillRect(renderer, &status_panel);
+  SDL_Rect status_top{status_panel.x + 1, status_panel.y + 1, status_panel.w - 2, 8};
+  set_draw_color(renderer, argb(255, 32, 35, 45));
+  SDL_RenderFillRect(renderer, &status_top);
+  set_draw_color(renderer, argb(255, 70, 78, 100));
+  SDL_RenderDrawRect(renderer, &status_panel);
+
+  const int max_chars = std::max(0, (status_panel.w - 16) / 12);
+  if (static_cast<int>(hover_text.size()) > max_chars) {
+    hover_text.resize(static_cast<std::size_t>(max_chars));
+  }
+  draw_text(renderer, status_panel.x + 8, status_panel.y + 12, hover_text, 2, argb(255, 220, 226, 240));
 
   SDL_Rect dst{0, toolbar_h, grid_w * scale, grid_h * scale};
   SDL_RenderCopy(renderer, texture, nullptr, &dst);

@@ -134,7 +134,9 @@ int main(int, char**) {
         mx = e.button.x;
         my = e.button.y;
 
-        if (auto hit = ren.hit_test_toolbar(mx, my)) {
+        if (ren.hit_test_clear_button(mx, my)) {
+          world.clear();
+        } else if (auto hit = ren.hit_test_toolbar(mx, my)) {
           brush = *hit;
           update_title(ren, brush, brush_radius, paused);
         }

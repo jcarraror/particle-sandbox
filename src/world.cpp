@@ -19,6 +19,13 @@ static constexpr int clampi(int v, int lo, int hi) {
   return (v < lo) ? lo : (v > hi ? hi : v);
 }
 
+/**
+ * @brief Constructs a world and initializes immutable border walls.
+ * @param width World width in cells.
+ * @param height World height in cells.
+ * @param seed PRNG seed used for stochastic updates.
+ * @return A ready-to-simulate world or an error when dimensions are invalid.
+ */
 std::expected<World, std::string> World::create(int width, int height, std::uint32_t seed) {
   if (width <= 0 || height <= 0) return std::unexpected("World size must be positive.");
 
@@ -40,30 +47,75 @@ std::expected<World, std::string> World::create(int width, int height, std::uint
   return wld;
 }
 
+/**
+ * @brief Creates a mutable 2D view over the internal cell buffer.
+ * @return Mutable row-major grid view.
+ */
 Grid2D<Cell> World::grid() {
   return Grid2D<Cell>{cells.data(), w, h};
 }
 
+/**
+ * @brief Creates a const 2D view over the internal cell buffer.
+ * @return Read-only row-major grid view.
+ */
 Grid2D<const Cell> World::grid() const {
   return Grid2D<const Cell>{cells.data(), w, h};
 }
 
+/**
+ * @brief Checks if a coordinate belongs to the simulation domain.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @return `true` when the coordinate is valid.
+ */
 bool World::in_bounds(int x, int y) const {
   return (x >= 0 && x < w && y >= 0 && y < h);
 }
 
+/**
+ * @brief Returns mutable access to a cell by coordinates.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @return Mutable reference to the selected cell.
+ */
 Cell& World::at(int x, int y) {
   return cells[static_cast<std::size_t>(y * w + x)];
 }
 
+/**
+ * @brief Returns const access to a cell by coordinates.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @return Const reference to the selected cell.
+ */
 const Cell& World::at(int x, int y) const {
   return cells[static_cast<std::size_t>(y * w + x)];
 }
 
+/**
+ * @brief Tests whether a coordinate currently contains empty space.
+ * @param x X coordinate.
+ * @param y Y coordinate.
+ * @return `true` if cell type is `CellType::Empty`.
+ */
 bool World::is_empty(int x, int y) const {
   return at(x, y).type == CellType::Empty;
 }
 
+/**
+ * @brief Moves one cell into a destination if that destination is empty.
+ *
+ * This is the used by all element step rules. When a move succeeds,
+ * the moved cell is stamped as updated for the current tick to prevent
+ * multiple moves in the same frame.
+ *
+ * @param x Source X.
+ * @param y Source Y.
+ * @param nx Destination X.
+ * @param ny Destination Y.
+ * @return `true` if movement occurred.
+ */
 bool World::try_move(int x, int y, int nx, int ny) {
   if (!in_bounds(nx, ny)) return false;
 
@@ -78,6 +130,11 @@ bool World::try_move(int x, int y, int nx, int ny) {
   return true;
 }
 
+/**
+ * @brief Resets the world to empty state and restores border walls.
+ *
+ * All interior cells become default
+ */
 void World::clear() {
   for (auto& c : cells) c = Cell{};
 
@@ -91,6 +148,17 @@ void World::clear() {
   }
 }
 
+/**
+ * @brief Paints a filled circular brush of material.
+ *
+ * Walls are preserved and never overwritten. Fire and lava are spawned with
+ * elevated temperatures; other materials are initialized near ambient.
+ *
+ * @param cx Brush center X.
+ * @param cy Brush center Y.
+ * @param radius Brush radius in cells.
+ * @param t Material to apply.
+ */
 void World::paint_disc(int cx, int cy, int radius, CellType t) {
   const int r2 = radius * radius;
 
@@ -114,6 +182,15 @@ void World::paint_disc(int cx, int cy, int radius, CellType t) {
   }
 }
 
+/**
+ * @brief Advances simulation by one frame.
+ *
+ * Update order:
+ * - Increment update stamp.
+ * - Sweep bottom-up so falling materials resolve naturally.
+ * - Randomize horizontal sweep direction per frame to reduce directional bias.
+ * - Apply simple global cooling/heating back toward ambient temperature.
+ */
 void World::tick() {
   stamp = static_cast<std::uint8_t>(stamp + 1);
   if (stamp == 0) stamp = 1;
@@ -138,6 +215,16 @@ void World::tick() {
   }
 }
 
+/**
+ * @brief Dispatches per-material update logic for one active cell.
+ *
+ * Empty/wall cells are skipped. Cells already stamped in this frame are also
+ * skipped to enforce single-update-per-tick semantics.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ * @param left_to_right Horizontal traversal direction hint for bias control.
+ */
 void World::step_cell(int x, int y, bool left_to_right) {
   Cell& c = at(x, y);
   if (c.type == CellType::Empty || c.type == CellType::Wall) return;
@@ -156,6 +243,15 @@ void World::step_cell(int x, int y, bool left_to_right) {
   }
 }
 
+/**
+ * @brief Sand rule: fall straight down, else slide diagonally down.
+ *
+ * Priority is down first, then one diagonal, then the opposite diagonal.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ * @param ltr Preferred diagonal order determined by frame sweep direction.
+ */
 void World::step_sand(int x, int y, bool ltr) {
   if (try_move(x, y, x, y + 1)) return;
 
@@ -166,6 +262,15 @@ void World::step_sand(int x, int y, bool ltr) {
   (void)try_move(x, y, x + dx2, y + 1);
 }
 
+/**
+ * @brief Water rule: fall down, then diagonals, then short lateral spread.
+ *
+ * Water can travel horizontally up to 3 cells when blocked vertically.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ * @param ltr Preferred diagonal order determined by frame sweep direction.
+ */
 void World::step_water(int x, int y, bool ltr) {
   if (try_move(x, y, x, y + 1)) return;
 
@@ -183,6 +288,16 @@ void World::step_water(int x, int y, bool ltr) {
   }
 }
 
+/**
+ * @brief Oil rule: similar to water but with wider lateral spread.
+ *
+ * Oil can travel horizontally up to 4 cells when blocked from falling.
+ * It is also flammable via fire interaction handled in `step_fire`.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ * @param ltr Preferred diagonal order determined by frame sweep direction.
+ */
 void World::step_oil(int x, int y, bool ltr) {
   if (try_move(x, y, x, y + 1)) return;
 
@@ -200,6 +315,13 @@ void World::step_oil(int x, int y, bool ltr) {
   }
 }
 
+/**
+ * @brief Smoke rule: rise upward, then diagonals upward, then drift sideways.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ * @param ltr Preferred horizontal order determined by frame sweep direction.
+ */
 void World::step_smoke(int x, int y, bool ltr) {
   if (try_move(x, y, x, y - 1)) return;
 
@@ -213,6 +335,15 @@ void World::step_smoke(int x, int y, bool ltr) {
   else (void)try_move(x, y, x + dx2, y);
 }
 
+/**
+ * @brief Adds heat to all valid Moore-neighborhood cells around a source.
+ *
+ * Empty cells and walls are excluded. Temperature is clamped to a safe range.
+ *
+ * @param x Source X.
+ * @param y Source Y.
+ * @param amount Heat delta to add per affected neighbor.
+ */
 void World::heat_neighbors(int x, int y, int amount) {
   for (int oy = -1; oy <= 1; ++oy) {
     for (int ox = -1; ox <= 1; ++ox) {
@@ -229,6 +360,18 @@ void World::heat_neighbors(int x, int y, int amount) {
   }
 }
 
+/**
+ * @brief Fire rule: self-heats, warms neighbors, ignites oil, then decays.
+ *
+ * Behavior summary:
+ * - Increases own temperature (capped).
+ * - Adds mild heat to adjacent cells.
+ * - Has a random chance to ignite neighboring oil into fire.
+ * - Randomly decays into smoke or disappears entirely.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ */
 void World::step_fire(int x, int y) {
   Cell& c = at(x, y);
   c.temp = static_cast<std::int16_t>(clampi(c.temp + 5, 20, 1200));
@@ -262,6 +405,18 @@ void World::step_fire(int x, int y) {
   }
 }
 
+/**
+ * @brief Lava rule: just like a liquid that flows and emits occasional smoke.
+ *
+ * Behavior summary:
+ * - Self-heats and strongly warms nearby cells.
+ * - Tries to fall/slide similarly to dense liquid.
+ * - Occasionally spawns smoke above when space is available.
+ *
+ * @param x Cell X.
+ * @param y Cell Y.
+ * @param ltr Preferred lateral order determined by frame sweep direction.
+ */
 void World::step_lava(int x, int y, bool ltr) {
   Cell& c = at(x, y);
   c.temp = static_cast<std::int16_t>(clampi(c.temp + 2, 20, 2000));
