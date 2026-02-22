@@ -207,6 +207,28 @@ static SDL_Rect toolbar_button_rect(int index, int toolbar_h) {
   return SDL_Rect{x, y, size, size};
 }
 
+enum class ToolbarActionSlot : int {
+  Random = 0,
+  Clear = 1,
+};
+
+/**
+ * @brief Computes the rectangle for a right-side toolbar action button.
+ * @param win_w Window width in pixels.
+ * @param toolbar_h Toolbar height in pixels.
+ * @param slot Action button slot from right to left.
+ * @return Screen-space action button rectangle.
+ */
+static SDL_Rect action_button_rect(int win_w, int toolbar_h, ToolbarActionSlot slot) {
+  const int pad = 12;
+  const int size = toolbar_h - 24;
+  const int width = 124;
+  const int gap = 10;
+  const int x = win_w - pad - width - (static_cast<int>(slot) * (width + gap));
+  const int y = 12;
+  return SDL_Rect{x, y, width, size};
+}
+
 /**
  * @brief Computes the rectangle for the toolbar clear button.
  * @param win_w Window width in pixels.
@@ -214,12 +236,17 @@ static SDL_Rect toolbar_button_rect(int index, int toolbar_h) {
  * @return Screen-space clear button rectangle.
  */
 static SDL_Rect clear_button_rect(int win_w, int toolbar_h) {
-  const int pad = 12;
-  const int size = toolbar_h - 24;
-  const int width = 124;
-  const int x = win_w - pad - width;
-  const int y = 12;
-  return SDL_Rect{x, y, width, size};
+  return action_button_rect(win_w, toolbar_h, ToolbarActionSlot::Clear);
+}
+
+/**
+ * @brief Computes the rectangle for the toolbar randomize button.
+ * @param win_w Window width in pixels.
+ * @param toolbar_h Toolbar height in pixels.
+ * @return Screen-space randomize button rectangle.
+ */
+static SDL_Rect random_button_rect(int win_w, int toolbar_h) {
+  return action_button_rect(win_w, toolbar_h, ToolbarActionSlot::Random);
 }
 
 /**
@@ -414,6 +441,12 @@ bool RendererSDL::hit_test_clear_button(int mx, int my) const {
   return mx >= b.x && mx < (b.x + b.w) && my >= b.y && my < (b.y + b.h);
 }
 
+bool RendererSDL::hit_test_random_button(int mx, int my) const {
+  if (my < 0 || my >= toolbar_h) return false;
+  const SDL_Rect b = random_button_rect(win_w, toolbar_h);
+  return mx >= b.x && mx < (b.x + b.w) && my >= b.y && my < (b.y + b.h);
+}
+
 /**
  * @brief Converts material enum value into toolbar display text.
  * @param t Material type.
@@ -457,6 +490,7 @@ void RendererSDL::draw(const World& world,
   SDL_RenderDrawLine(renderer, 0, toolbar_h - 1, win_w, toolbar_h - 1);
 
   std::optional<CellType> hovered = hit_test_toolbar(mouse_x, mouse_y);
+  const bool random_hovered = hit_test_random_button(mouse_x, mouse_y);
   const bool clear_hovered = hit_test_clear_button(mouse_x, mouse_y);
 
   const auto mats = materials();
@@ -485,7 +519,18 @@ void RendererSDL::draw(const World& world,
     draw_icon(renderer, b, mats[i].type, argb(255, 220, 220, 230));
   }
 
-  // Draw clear/reset button on the right side of the toolbar.
+  // Draw right-side action buttons.
+  const SDL_Rect random_btn = random_button_rect(win_w, toolbar_h);
+  const std::uint32_t random_bg = random_hovered ? argb(255, 42, 76, 88) : argb(255, 30, 56, 64);
+  set_draw_color(renderer, random_bg);
+  SDL_RenderFillRect(renderer, &random_btn);
+  SDL_Rect random_top{random_btn.x + 1, random_btn.y + 1, random_btn.w - 2, 8};
+  set_draw_color(renderer, random_hovered ? argb(255, 64, 114, 128) : argb(255, 48, 86, 96));
+  SDL_RenderFillRect(renderer, &random_top);
+  set_draw_color(renderer, argb(255, 105, 170, 185));
+  SDL_RenderDrawRect(renderer, &random_btn);
+  draw_text(renderer, random_btn.x + 10, random_btn.y + 12, "RANDOM", 2, argb(255, 226, 242, 244));
+
   const SDL_Rect clear_btn = clear_button_rect(win_w, toolbar_h);
   const std::uint32_t clear_bg = clear_hovered ? argb(255, 88, 44, 44) : argb(255, 64, 32, 32);
   set_draw_color(renderer, clear_bg);
@@ -498,7 +543,9 @@ void RendererSDL::draw(const World& world,
   draw_text(renderer, clear_btn.x + 18, clear_btn.y + 12, "RESET", 2, argb(255, 244, 226, 226));
 
   std::string hover_text;
-  if (clear_hovered) {
+  if (random_hovered) {
+    hover_text = "GENERATE RANDOM START [R]";
+  } else if (clear_hovered) {
     hover_text = "RESET WORLD [C]";
   } else if (hovered.has_value()) {
     for (const auto& m : mats) {
@@ -513,7 +560,8 @@ void RendererSDL::draw(const World& world,
   }
 
   const int panel_x = tools_right + 16;
-  const int panel_w = std::max(120, clear_btn.x - 16 - panel_x);
+  const int actions_left = std::min(random_btn.x, clear_btn.x);
+  const int panel_w = std::max(120, actions_left - 16 - panel_x);
   SDL_Rect status_panel{panel_x, 12, panel_w, toolbar_h - 24};
   set_draw_color(renderer, argb(255, 22, 24, 30));
   SDL_RenderFillRect(renderer, &status_panel);

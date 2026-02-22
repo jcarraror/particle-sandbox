@@ -138,6 +138,101 @@ void World::clear() {
 }
 
 /**
+ * @brief Builds a randomized sandbox scene.
+ *
+ * creates a layered terrain base plus some blobs
+ * (water/oil/lava), ignition points and wall structures
+ */
+void World::generate_random_scene() {
+  clear();
+
+  auto spawn_temp_for = [](CellType t) -> std::int16_t {
+    if (t == CellType::Fire) return 300;
+    if (t == CellType::Lava) return 800;
+    return 20;
+  };
+
+  auto set_cell = [&](int x, int y, CellType t) {
+    if (!in_bounds(x, y)) return;
+    Cell& c = at(x, y);
+    if (c.type == CellType::Wall && t != CellType::Wall) return;
+    c.type = t;
+    c.temp = spawn_temp_for(t);
+    c.updated = stamp;
+  };
+
+  // sandy terrain profile over the lower half.
+  int terrain_y = (h * 2) / 3;
+  for (int x = 2; x < w - 2; ++x) {
+    terrain_y += rng.next_int(-2, 2);
+    terrain_y = std::clamp(terrain_y, h / 2, h - 10);
+    for (int y = terrain_y; y < h - 1; ++y) set_cell(x, y, CellType::Sand);
+  }
+
+  // few pockets so fluid flow has paths.
+  for (int i = 0; i < 5; ++i) {
+    paint_disc(rng.next_int(w / 6, w - w / 6),
+              rng.next_int(h / 2, h - 14),
+              rng.next_int(4, 9),
+              CellType::Empty);
+  }
+
+  // water basin on the left.
+  for (int i = 0; i < 7; ++i) {
+    paint_disc(rng.next_int(12, w / 3),
+              rng.next_int(h / 2, h - 12),
+              rng.next_int(3, 8),
+              CellType::Water);
+  }
+
+  // oil reservoir on the right.
+  for (int i = 0; i < 6; ++i) {
+    paint_disc(rng.next_int((w * 2) / 3, w - 12),
+              rng.next_int(h / 2, h - 12),
+              rng.next_int(3, 7),
+              CellType::Oil);
+  }
+
+  // lava plume near the center-bottom.
+  const int vent_x = rng.next_int(w / 3, (w * 2) / 3);
+  const int vent_top = rng.next_int(h / 2, (h * 3) / 4);
+  for (int y = h - 2; y >= vent_top; --y) {
+    set_cell(vent_x + rng.next_int(-1, 1), y, CellType::Lava);
+    if ((rng.next_u32() % 3u) == 0u) set_cell(vent_x + rng.next_int(-2, 2), y, CellType::Lava);
+  }
+  for (int i = 0; i < 4; ++i) {
+    paint_disc(vent_x + rng.next_int(-10, 10),
+              rng.next_int(vent_top - 6, vent_top + 4),
+              rng.next_int(2, 5),
+              CellType::Lava);
+  }
+
+  // interior walls create channels
+  for (int i = 0; i < 4; ++i) {
+    const int x = rng.next_int(8, w - 9);
+    const int y0 = rng.next_int(h / 2, h - 20);
+    const int height = rng.next_int(6, 18);
+    for (int y = y0; y < std::min(h - 1, y0 + height); ++y) {
+      set_cell(x, y, CellType::Wall);
+      if ((rng.next_u32() % 4u) == 0u && x + 1 < w - 1) set_cell(x + 1, y, CellType::Wall);
+    }
+  }
+
+  for (int i = 0; i < 5; ++i) {
+    paint_disc(rng.next_int((w * 2) / 3, w - 12),
+              rng.next_int(h / 3, h - 18),
+              rng.next_int(1, 2),
+              CellType::Fire);
+  }
+  for (int i = 0; i < 8; ++i) {
+    paint_disc(vent_x + rng.next_int(-14, 14),
+              rng.next_int(std::max(2, vent_top - 16), std::max(3, vent_top - 3)),
+              1,
+              CellType::Smoke);
+  }
+}
+
+/**
  * @brief Paints a filled circular brush of material.
  *
  * Walls are preserved and never overwritten. Fire and lava are spawned with

@@ -114,6 +114,14 @@ struct RendererSDL {
   bool hit_test_clear_button(int mx, int my) const;
 
   /**
+   * @brief Checks if the mouse is over the toolbar randomize button.
+   * @param mx Mouse X in window pixels.
+   * @param my Mouse Y in window pixels.
+   * @return `true` if over the randomize button.
+   */
+  bool hit_test_random_button(int mx, int my) const;
+
+  /**
    * @brief Checks whether mouse Y is inside the toolbar area.
    * @param my Mouse Y in window pixels.
    * @return `true` if inside toolbar vertical bounds.

@@ -102,6 +102,14 @@ struct World {
   void clear();
 
   /**
+   * @brief Generates a randomized starting scene.
+   *
+   * Produces a terrain/fluid/hotspot layout using the world's RNG so each
+   * invocation starts from a different setup.
+   */
+  void generate_random_scene();
+
+  /**
    * @brief Advances the simulation by one tick.
    */
   void tick();
