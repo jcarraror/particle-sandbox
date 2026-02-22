@@ -20,6 +20,31 @@ static constexpr int clampi(int v, int lo, int hi) {
 
 namespace {
 
+namespace simcfg {
+constexpr int kAmbientTemp = 20;
+constexpr int kMinCellTemp = -50;
+constexpr int kMaxNeighborHeatTemp = 2000;
+
+constexpr std::uint32_t kOilIgniteOddsDivisor = 7;
+constexpr std::int16_t kIgnitedFireTemp = 300;
+
+constexpr int kWaterSpread = 3;
+constexpr int kOilSpread = 4;
+
+constexpr int kFireSelfHeatPerTick = 5;
+constexpr int kFireNeighborHeatPerTick = 3;
+constexpr int kFireMaxTemp = 1200;
+constexpr std::uint32_t kFireToSmokeOddsDivisor = 25;
+constexpr std::uint32_t kFireExtinguishOddsDivisor = 120;
+constexpr std::int16_t kSmokeFromFireTemp = 80;
+
+constexpr int kLavaSelfHeatPerTick = 2;
+constexpr int kLavaNeighborHeatPerTick = 6;
+constexpr int kLavaMaxTemp = 2000;
+constexpr std::uint32_t kLavaSmokeSpawnOddsDivisor = 80;
+constexpr std::int16_t kSmokeFromLavaTemp = 120;
+}  // namespace simcfg
+
 struct NeighborOffset {
   int dx;
   int dy;
@@ -44,10 +69,10 @@ void for_each_neighbor(World& world, int x, int y, Fn&& fn) {
 void ignite_oil_neighbors(World& world, int x, int y) {
   for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
     if (n.type != CellType::Oil) return;
-    if ((world.rng.next_u32() % 7u) != 0u) return;
+    if ((world.rng.next_u32() % simcfg::kOilIgniteOddsDivisor) != 0u) return;
 
     n.type = CellType::Fire;
-    n.temp = 300;
+    n.temp = simcfg::kIgnitedFireTemp;
     n.updated = world.stamp;
   });
 }
@@ -119,10 +144,9 @@ void World::step_water(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
 
-  const int spread = 3;
   const int dir = (rng.coin() ? 1 : -1);
 
-  for (int i = 1; i <= spread; ++i) {
+  for (int i = 1; i <= simcfg::kWaterSpread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
   }
 }
@@ -146,10 +170,9 @@ void World::step_oil(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
 
-  const int spread = 4;
   const int dir = (rng.coin() ? 1 : -1);
 
-  for (int i = 1; i <= spread; ++i) {
+  for (int i = 1; i <= simcfg::kOilSpread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
   }
 }
@@ -186,7 +209,8 @@ void World::step_smoke(int x, int y, bool ltr) {
 void World::heat_neighbors(int x, int y, int amount) {
   for_each_neighbor(*this, x, y, [&](int, int, Cell& n) {
     if (n.type == CellType::Wall || n.type == CellType::Empty) return;
-    n.temp = static_cast<std::int16_t>(clampi(n.temp + amount, -50, 2000));
+    n.temp = static_cast<std::int16_t>(
+        clampi(n.temp + amount, simcfg::kMinCellTemp, simcfg::kMaxNeighborHeatTemp));
   });
 }
 
@@ -204,19 +228,20 @@ void World::heat_neighbors(int x, int y, int amount) {
  */
 void World::step_fire(int x, int y) {
   Cell& c = at(x, y);
-  c.temp = static_cast<std::int16_t>(clampi(c.temp + 5, 20, 1200));
-  heat_neighbors(x, y, 3);
+  c.temp = static_cast<std::int16_t>(
+      clampi(c.temp + simcfg::kFireSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kFireMaxTemp));
+  heat_neighbors(x, y, simcfg::kFireNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
 
   const std::uint32_t r = rng.next_u32();
-  if ((r % 25u) == 0u) {
+  if ((r % simcfg::kFireToSmokeOddsDivisor) == 0u) {
     c.type = CellType::Smoke;
-    c.temp = 80;
+    c.temp = simcfg::kSmokeFromFireTemp;
     return;
   }
-  if ((r % 120u) == 0u) {
+  if ((r % simcfg::kFireExtinguishOddsDivisor) == 0u) {
     c.type = CellType::Empty;
-    c.temp = 20;
+    c.temp = simcfg::kAmbientTemp;
     return;
   }
 }
@@ -236,8 +261,9 @@ void World::step_fire(int x, int y) {
  */
 void World::step_lava(int x, int y, bool ltr) {
   Cell& c = at(x, y);
-  c.temp = static_cast<std::int16_t>(clampi(c.temp + 2, 20, 2000));
-  heat_neighbors(x, y, 6);
+  c.temp = static_cast<std::int16_t>(
+      clampi(c.temp + simcfg::kLavaSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kLavaMaxTemp));
+  heat_neighbors(x, y, simcfg::kLavaNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
 
   if (try_move(x, y, x, y + 1)) return;
@@ -251,10 +277,10 @@ void World::step_lava(int x, int y, bool ltr) {
   if (rng.coin()) (void)try_move(x, y, x + dx1, y);
   else (void)try_move(x, y, x + dx2, y);
 
-  if ((rng.next_u32() % 80u) == 0u) {
+  if ((rng.next_u32() % simcfg::kLavaSmokeSpawnOddsDivisor) == 0u) {
     if (in_bounds(x, y - 1) && at(x, y - 1).type == CellType::Empty) {
       at(x, y - 1).type = CellType::Smoke;
-      at(x, y - 1).temp = 120;
+      at(x, y - 1).temp = simcfg::kSmokeFromLavaTemp;
       at(x, y - 1).updated = stamp;
     }
   }
