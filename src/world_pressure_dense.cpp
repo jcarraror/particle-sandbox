@@ -94,9 +94,13 @@ bool supports_dense(CellType t) noexcept {
   return t != CellType::Empty && t != CellType::Smoke;
 }
 
-bool participates_in_dense_relaxation(CellType t) noexcept {
-  // liquids out for now to avoid reintroducing pressure-smoothing artifacts in flow.
-  return t == CellType::Lava || t == CellType::Sand;
+bool contributes_dense_relaxation_load(CellType t) noexcept {
+  return t == CellType::Lava || t == CellType::Sand || t == CellType::Water ||
+         t == CellType::Oil || t == CellType::Wall;
+}
+
+bool receives_dense_relaxation(CellType t) noexcept {
+  return t == CellType::Lava || t == CellType::Sand || t == CellType::Wall;
 }
 
 int vertical_overburden_load(const World& world, int x, int y) {
@@ -211,7 +215,7 @@ void relax_dense_pressure(World& world) {
 
     auto maybe_add = [&](int nx, int ny, int weight, int& accum, int& total_w) {
       const Cell& n = world.at(nx, ny);
-      if (!participates_in_dense_relaxation(n.type)) return;
+      if (!contributes_dense_relaxation_load(n.type)) return;
       accum += static_cast<int>(n.pressure) * weight;
       total_w += weight;
     };
@@ -219,7 +223,7 @@ void relax_dense_pressure(World& world) {
     for (int y = 1; y < world.h - 1; ++y) {
       for (int x = 1; x < world.w - 1; ++x) {
         Cell& c = world.at(x, y);
-        if (!participates_in_dense_relaxation(c.type)) continue;
+        if (!receives_dense_relaxation(c.type)) continue;
 
         int accum = static_cast<int>(c.pressure) * kDenseRelaxSelfWeight;
         int total_w = kDenseRelaxSelfWeight;
@@ -244,7 +248,7 @@ void relax_dense_pressure(World& world) {
     for (int y = 1; y < world.h - 1; ++y) {
       for (int x = 1; x < world.w - 1; ++x) {
         Cell& c = world.at(x, y);
-        if (!participates_in_dense_relaxation(c.type)) continue;
+        if (!receives_dense_relaxation(c.type)) continue;
         c.pressure = next[static_cast<std::size_t>(y * world.w + x)];
       }
     }
