@@ -46,13 +46,27 @@ constexpr int kLavaNeighborHeatPerTick = 6;
 constexpr int kLavaMaxTemp = 2000;
 constexpr int kLavaWaterCoolPerNeighbor = 28;
 constexpr int kLavaWaterPressureSpike = 70;
-constexpr std::uint32_t kLavaWaterSteamBurstOddsDivisor = 2;
-constexpr int kLavaSteamBurstTempThreshold = 110;
+constexpr std::uint32_t kLavaWaterSteamBurstOddsDivisor = 5;
+constexpr int kLavaSteamBurstTempThreshold = 150;
 constexpr int kLavaSteamSpawnPressure = 180;
+constexpr int kLavaCrustCoolingPerWallNeighbor = 7;
+constexpr int kLavaCrustCoolingPerWetWallNeighbor = 11;
+constexpr int kLavaCrustTempThreshold = 260;
+constexpr int kLavaFastCrustTempThreshold = 140;
+constexpr std::uint32_t kLavaCrustOddsDivisorBase = 7;
+constexpr int kLavaCrustPropagateTempThreshold = 260;
+constexpr std::uint32_t kLavaCrustPropagateOddsDivisor = 6;
+constexpr int kLavaPassiveSolidifyTempThreshold = 120;
+constexpr std::uint32_t kLavaPassiveSolidifyOddsDivisor = 60;
+constexpr std::uint32_t kLavaPassiveSolidifyNearWallOddsDivisor = 18;
 constexpr int kWaterHeatAbsorbFromFire = 16;
 constexpr int kWaterHeatAbsorbFromLava = 10;
 constexpr int kWaterSteamTempThreshold = 140;
 constexpr std::uint32_t kWaterSteamOddsDivisor = 5;
+constexpr std::uint32_t kWaterSteamDirectLavaBonusDivisor = 2;
+constexpr std::uint32_t kWaterSteamDirectFireBonusDivisor = 3;
+constexpr std::uint32_t kWaterSteamHotWallOddsDivisor = 10;
+constexpr int kHotWallSteamTempThreshold = 180;
 constexpr std::int16_t kSteamTemp = 130;
 constexpr std::uint32_t kSmokeBubbleSwapOddsDivisor = 2;
 constexpr std::uint32_t kSteamBubbleSwapOddsDivisor = 1;
@@ -128,16 +142,27 @@ bool try_evaporate_water(World& world, int x, int y) {
   if (c.type != CellType::Water) return false;
   if (c.temp < simcfg::kWaterSteamTempThreshold) return false;
 
-  bool near_hot = false;
-  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
-    if (n.type == CellType::Fire || n.type == CellType::Lava) near_hot = true;
-  });
-  if (!near_hot) return false;
+  int direct_lava = 0;
+  int direct_fire = 0;
+  int hot_wall = 0;
+  for (const auto [dx, dy] : std::array<NeighborOffset, 4>{{{0, -1}, {1, 0}, {0, 1}, {-1, 0}}}) {
+    const int nx = x + dx;
+    const int ny = y + dy;
+    if (!world.in_bounds(nx, ny)) continue;
+    const Cell& n = world.at(nx, ny);
+    if (n.type == CellType::Lava) ++direct_lava;
+    else if (n.type == CellType::Fire) ++direct_fire;
+    else if (n.type == CellType::Wall && n.temp >= simcfg::kHotWallSteamTempThreshold) ++hot_wall;
+  }
+  if (direct_lava == 0 && direct_fire == 0 && hot_wall == 0) return false;
 
   const int overheat = std::max(0, static_cast<int>(c.temp) - simcfg::kWaterSteamTempThreshold);
   const std::uint32_t bonus = static_cast<std::uint32_t>(overheat / 40);
-  const std::uint32_t divisor =
+  std::uint32_t divisor =
       std::max<std::uint32_t>(1u, simcfg::kWaterSteamOddsDivisor - std::min<std::uint32_t>(3u, bonus));
+  if (direct_lava > 0) divisor = std::max<std::uint32_t>(1u, divisor / simcfg::kWaterSteamDirectLavaBonusDivisor);
+  else if (direct_fire > 0) divisor = std::max<std::uint32_t>(1u, divisor / simcfg::kWaterSteamDirectFireBonusDivisor);
+  else if (hot_wall > 0) divisor = std::max(divisor, simcfg::kWaterSteamHotWallOddsDivisor);
   if ((world.rng.next_u32() % divisor) != 0u) return false;
 
   c.type = CellType::Smoke;
@@ -182,6 +207,23 @@ bool try_swap_smoke_with_fluid(World& world, int x, int y, int nx, int ny) {
 
   std::swap(src, dst);
   world.at(nx, ny).updated = world.stamp;
+  return true;
+}
+
+bool try_swap_liquid_with_smoke(World& world, int x, int y, int nx, int ny) {
+  if (!world.in_bounds(nx, ny)) return false;
+
+  Cell& src = world.at(x, y);
+  Cell& dst = world.at(nx, ny);
+  if (dst.type != CellType::Smoke) return false;
+
+  const bool liquid_src =
+      src.type == CellType::Water || src.type == CellType::Oil || src.type == CellType::Lava;
+  if (!liquid_src) return false;
+
+  std::swap(src, dst);
+  src.updated = world.stamp;  // displaced smoke should not re-step this tick
+  dst.updated = world.stamp;  // moved liquid already consumed its step
   return true;
 }
 
@@ -232,13 +274,53 @@ int liquid_pressure_spread_bonus(World& world, int x, int y, bool ltr) {
   return std::clamp(bonus, 0, simcfg::kLiquidMaxSpreadBonus);
 }
 
-void trigger_lava_water_contact(World& world, int x, int y) {
+struct LavaContactResult {
+  int water_contacts = 0;
+  int steam_bursts = 0;
+};
+
+int count_adjacent_type(World& world, int x, int y, CellType t) {
+  int count = 0;
+  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
+    if (n.type == t) ++count;
+  });
+  return count;
+}
+
+int count_adjacent_wet_walls(World& world, int x, int y) {
+  int count = 0;
+  for_each_neighbor(world, x, y, [&](int nx, int ny, Cell& n) {
+    if (n.type != CellType::Wall) return;
+    bool wet = false;
+    for_each_neighbor(world, nx, ny, [&](int, int, Cell& m) {
+      if (m.type == CellType::Water) wet = true;
+    });
+    if (wet) ++count;
+  });
+  return count;
+}
+
+void cool_lava_through_crust(World& world, int x, int y) {
+  Cell& c = world.at(x, y);
+  if (c.type != CellType::Lava) return;
+
+  const int wall_neighbors = count_adjacent_type(world, x, y, CellType::Wall);
+  const int wet_wall_neighbors = count_adjacent_wet_walls(world, x, y);
+  if (wall_neighbors == 0) return;
+
+  const int cooling = wall_neighbors * simcfg::kLavaCrustCoolingPerWallNeighbor +
+                      wet_wall_neighbors * (simcfg::kLavaCrustCoolingPerWetWallNeighbor - simcfg::kLavaCrustCoolingPerWallNeighbor);
+  c.temp = static_cast<std::int16_t>(clampi(
+      static_cast<int>(c.temp) - cooling, simcfg::kAmbientTemp, simcfg::kLavaMaxTemp));
+}
+
+LavaContactResult trigger_lava_water_contact(World& world, int x, int y) {
   Cell& lava = world.at(x, y);
-  int contacts = 0;
+  LavaContactResult result{};
 
   for_each_neighbor(world, x, y, [&](int nx, int ny, Cell& n) {
     if (n.type != CellType::Water) return;
-    ++contacts;
+    ++result.water_contacts;
 
     n.temp = static_cast<std::int16_t>(clampi(
         n.temp + simcfg::kWaterHeatAbsorbFromLava + simcfg::kWaterHeatAbsorbFromFire,
@@ -250,6 +332,7 @@ void trigger_lava_water_contact(World& world, int x, int y) {
     const bool hot_enough = n.temp >= simcfg::kLavaSteamBurstTempThreshold;
     const bool burst = (world.rng.next_u32() % simcfg::kLavaWaterSteamBurstOddsDivisor) == 0u;
     if (!hot_enough || !burst) return;
+    ++result.steam_bursts;
 
     n.type = CellType::Smoke;  // Steam proxy.
     n.temp = simcfg::kSteamTemp;
@@ -267,11 +350,60 @@ void trigger_lava_water_contact(World& world, int x, int y) {
     }
   });
 
-  if (contacts == 0) return;
+  if (result.water_contacts == 0) return result;
   lava.temp = static_cast<std::int16_t>(clampi(
-      lava.temp - contacts * simcfg::kLavaWaterCoolPerNeighbor,
+      lava.temp - result.water_contacts * simcfg::kLavaWaterCoolPerNeighbor,
       simcfg::kAmbientTemp,
       simcfg::kLavaMaxTemp));
+  return result;
+}
+
+bool try_solidify_lava(World& world, int x, int y, int water_contacts) {
+  Cell& c = world.at(x, y);
+  if (c.type != CellType::Lava) return false;
+
+  const int adjacent_wall = count_adjacent_type(world, x, y, CellType::Wall);
+  const bool water_cooled = water_contacts > 0;
+  const bool cool_enough = c.temp <= simcfg::kLavaCrustTempThreshold;
+  const bool nucleated_by_crust = adjacent_wall > 0 && c.temp <= simcfg::kLavaCrustPropagateTempThreshold;
+  const bool passively_solidifies = c.temp <= simcfg::kLavaPassiveSolidifyTempThreshold;
+
+  if (!cool_enough && !nucleated_by_crust && !passively_solidifies) return false;
+
+  std::uint32_t divisor = 0;
+  if (water_cooled) {
+    const bool very_cool = c.temp <= simcfg::kLavaFastCrustTempThreshold;
+    const std::uint32_t contact_bonus = static_cast<std::uint32_t>(std::min(water_contacts, 3));
+    const std::uint32_t cool_bonus = very_cool ? 2u : 0u;
+    divisor = std::max<std::uint32_t>(1u, simcfg::kLavaCrustOddsDivisorBase - contact_bonus - cool_bonus);
+  } else if (nucleated_by_crust) {
+    divisor = std::max<std::uint32_t>(
+        1u, simcfg::kLavaCrustPropagateOddsDivisor - static_cast<std::uint32_t>(std::min(adjacent_wall, 2)));
+  } else {
+    divisor = (adjacent_wall > 0) ? simcfg::kLavaPassiveSolidifyNearWallOddsDivisor
+                                  : simcfg::kLavaPassiveSolidifyOddsDivisor;
+  }
+
+  if ((world.rng.next_u32() % divisor) != 0u) return false;
+
+  c.type = CellType::Wall;
+  c.temp = static_cast<std::int16_t>(std::max(simcfg::kAmbientTemp, static_cast<int>(c.temp) / 2));
+  c.pressure = 0;
+
+  // grow a thicker crust front by solidifying adjacent cooled lava.
+  int propagated = 0;
+  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
+    if (propagated >= 2) return;
+    if (n.type != CellType::Lava) return;
+    if (n.temp > simcfg::kLavaCrustPropagateTempThreshold) return;
+    if ((world.rng.next_u32() % simcfg::kLavaCrustPropagateOddsDivisor) != 0u) return;
+    n.type = CellType::Wall;
+    n.temp = static_cast<std::int16_t>(std::max(simcfg::kAmbientTemp, static_cast<int>(n.temp) / 2));
+    n.pressure = 0;
+    n.updated = world.stamp;
+    ++propagated;
+  });
+  return true;
 }
 
 }  // namespace
@@ -337,12 +469,15 @@ void World::step_water(int x, int y, bool ltr) {
   if (try_evaporate_water(*this, x, y)) return;
 
   if (try_move(x, y, x, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x, y + 1)) return;
 
   const int dx1 = (ltr ? -1 : 1);
   const int dx2 = -dx1;
 
   if (try_move(x, y, x + dx1, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x + dx2, y + 1)) return;
 
   const int dir = choose_liquid_spread_dir(*this, x, y, ltr);
 
@@ -364,12 +499,15 @@ void World::step_water(int x, int y, bool ltr) {
  */
 void World::step_oil(int x, int y, bool ltr) {
   if (try_move(x, y, x, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x, y + 1)) return;
 
   const int dx1 = (ltr ? -1 : 1);
   const int dx2 = -dx1;
 
   if (try_move(x, y, x + dx1, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x + dx2, y + 1)) return;
 
   const int dir = choose_liquid_spread_dir(*this, x, y, ltr);
 
@@ -487,6 +625,7 @@ void World::step_fire(int x, int y) {
  * Behavior summary:
  * - Self-heats and strongly warms nearby cells.
  * - Has a random chance to ignite neighboring oil into fire.
+ * - Can cool and crust into stone solid under sustained water contact.
  * - Tries to fall/slide similarly to dense liquid.
  * - Occasionally spawns smoke above when space is available.
  *
@@ -500,15 +639,20 @@ void World::step_lava(int x, int y, bool ltr) {
       clampi(c.temp + simcfg::kLavaSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kLavaMaxTemp));
   heat_neighbors(x, y, simcfg::kLavaNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
-  trigger_lava_water_contact(*this, x, y);
+  const LavaContactResult contact = trigger_lava_water_contact(*this, x, y);
+  cool_lava_through_crust(*this, x, y);
+  if (try_solidify_lava(*this, x, y, contact.water_contacts)) return;
 
   if (try_move(x, y, x, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x, y + 1)) return;
 
   const int dx1 = (ltr ? -1 : 1);
   const int dx2 = -dx1;
 
   if (try_move(x, y, x + dx1, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
+  if (try_swap_liquid_with_smoke(*this, x, y, x + dx2, y + 1)) return;
 
   if (rng.coin()) (void)try_move(x, y, x + dx1, y);
   else (void)try_move(x, y, x + dx2, y);
