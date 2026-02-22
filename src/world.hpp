@@ -198,4 +198,9 @@ private:
    * conductivities to smooth extreme gradients before relaxation.
    */
   void pass_thermal_exchange();
+
+  /**
+   * @brief Updates lightweight pressure heuristics for gas-like materials.
+   */
+  void pass_pressure_update();
 };

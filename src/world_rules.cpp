@@ -52,6 +52,10 @@ constexpr std::int16_t kSteamTemp = 130;
 constexpr std::uint32_t kSmokeBubbleSwapOddsDivisor = 2;
 constexpr std::uint32_t kSteamBubbleSwapOddsDivisor = 1;
 constexpr int kSteamSmokeTempThreshold = 120;
+constexpr int kHighSmokePressure = 80;
+constexpr int kExtremeSmokePressure = 150;
+constexpr int kSmokeCondenseTempThreshold = 55;
+constexpr std::uint32_t kSmokeCondenseOddsDivisor = 8;
 constexpr std::uint32_t kLavaSmokeSpawnOddsDivisor = 80;
 constexpr std::int16_t kSmokeFromLavaTemp = 120;
 }  // namespace simcfg
@@ -162,13 +166,29 @@ bool try_swap_smoke_with_fluid(World& world, int x, int y, int nx, int ny) {
   if (dst.type != CellType::Water && dst.type != CellType::Oil) return false;
 
   const bool steam_like = src.temp >= simcfg::kSteamSmokeTempThreshold;
-  const std::uint32_t divisor =
+  std::uint32_t divisor =
       steam_like ? simcfg::kSteamBubbleSwapOddsDivisor : simcfg::kSmokeBubbleSwapOddsDivisor;
+  if (src.pressure >= simcfg::kHighSmokePressure && divisor > 1u) divisor -= 1u;
   if (divisor > 1u && (world.rng.next_u32() % divisor) != 0u) return false;
 
   std::swap(src, dst);
   world.at(nx, ny).updated = world.stamp;
   return true;
+}
+
+bool smoke_has_escape_route(World& world, int x, int y) {
+  static constexpr std::array<NeighborOffset, 5> kEscapeOffsets{{
+      {0, -1}, {-1, -1}, {1, -1}, {-1, 0}, {1, 0},
+  }};
+
+  for (const auto [dx, dy] : kEscapeOffsets) {
+    const int nx = x + dx;
+    const int ny = y + dy;
+    if (!world.in_bounds(nx, ny)) continue;
+    const CellType t = world.at(nx, ny).type;
+    if (t == CellType::Empty || t == CellType::Smoke) return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -282,6 +302,8 @@ void World::step_oil(int x, int y, bool ltr) {
  * @param ltr Preferred horizontal order determined by frame sweep direction.
  */
 void World::step_smoke(int x, int y, bool ltr) {
+  const int pressure = at(x, y).pressure;
+
   if (try_move(x, y, x, y - 1)) return;
   if (try_swap_smoke_with_fluid(*this, x, y, x, y - 1)) return;
 
@@ -293,8 +315,28 @@ void World::step_smoke(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx2, y - 1)) return;
   if (try_swap_smoke_with_fluid(*this, x, y, x + dx2, y - 1)) return;
 
-  if (rng.coin()) (void)try_move(x, y, x + dx1, y);
-  else (void)try_move(x, y, x + dx2, y);
+  if (pressure >= simcfg::kHighSmokePressure) {
+    if (try_move(x, y, x + dx1, y)) return;
+    if (try_move(x, y, x + dx2, y)) return;
+  }
+
+  if (rng.coin()) {
+    if (try_move(x, y, x + dx1, y)) return;
+    (void)try_move(x, y, x + dx2, y);
+  } else {
+    if (try_move(x, y, x + dx2, y)) return;
+    (void)try_move(x, y, x + dx1, y);
+  }
+
+  Cell& c = at(x, y);
+  if (c.pressure >= simcfg::kExtremeSmokePressure &&
+      c.temp <= simcfg::kSmokeCondenseTempThreshold &&
+      !smoke_has_escape_route(*this, x, y) &&
+      (rng.next_u32() % simcfg::kSmokeCondenseOddsDivisor) == 0u) {
+    c.type = CellType::Empty;
+    c.temp = simcfg::kAmbientTemp;
+    c.pressure = 0;
+  }
 }
 
 /**

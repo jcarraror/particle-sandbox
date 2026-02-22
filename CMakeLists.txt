@@ -14,6 +14,7 @@ add_executable(particle_sandbox
   src/main.cpp
   src/world.cpp
   src/world_thermo.cpp
+  src/world_pressure.cpp
   src/world_rules.cpp
   src/render_sdl.cpp
 )

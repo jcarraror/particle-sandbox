@@ -274,6 +274,8 @@ void World::tick() {
   stamp = static_cast<std::uint8_t>(stamp + 1);
   if (stamp == 0) stamp = 1;
 
+  pass_pressure_update();
+
   const bool left_to_right = (rng.next_u32() & 1u) != 0;
 
   for (int y = h - 2; y >= 1; --y) {
