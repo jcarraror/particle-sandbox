@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(particle_sandbox
   src/main.cpp
   src/world.cpp
+  src/world_rules.cpp
   src/render_sdl.cpp
 )
 

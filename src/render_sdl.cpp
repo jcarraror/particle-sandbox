@@ -10,6 +10,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -72,6 +73,17 @@ struct Glyph {
   char c;
   std::array<std::uint8_t, 7> rows;
 };
+
+constexpr std::array<MaterialButton, 8> kMaterialButtons{{
+    {CellType::Sand, "SAND", "[1]"},
+    {CellType::Water, "WATER", "[2]"},
+    {CellType::Oil, "OIL", "[3]"},
+    {CellType::Fire, "FIRE", "[4]"},
+    {CellType::Smoke, "SMOKE", "[5]"},
+    {CellType::Lava, "LAVA", "[6]"},
+    {CellType::Wall, "WALL", "[7]"},
+    {CellType::Empty, "ERASE", "[0]"},
+}};
 
 /**
  * @brief Font table for UI text rendering.
@@ -164,17 +176,8 @@ static void draw_text(SDL_Renderer* r, int x, int y, const std::string& s, int s
   }
 }
 
-std::vector<MaterialButton> RendererSDL::materials() {
-  return {
-    {CellType::Sand, "SAND", "[1]"},
-    {CellType::Water, "WATER", "[2]"},
-    {CellType::Oil, "OIL", "[3]"},
-    {CellType::Fire, "FIRE", "[4]"},
-    {CellType::Smoke, "SMOKE", "[5]"},
-    {CellType::Lava, "LAVA", "[6]"},
-    {CellType::Wall, "WALL", "[7]"},
-    {CellType::Empty, "ERASE", "[0]"},
-  };
+std::span<const MaterialButton> RendererSDL::materials() {
+  return kMaterialButtons;
 }
 
 /**
@@ -305,6 +308,7 @@ std::expected<RendererSDL, std::string> RendererSDL::create(int gw, int gh, int 
   }
 
   RendererSDL r;
+  r.owns_sdl_video = true;
   r.scale = (s <= 0) ? 1 : s;
   r.grid_w = gw;
   r.grid_h = gh;
@@ -329,14 +333,53 @@ std::expected<RendererSDL, std::string> RendererSDL::create(int gw, int gh, int 
   return r;
 }
 
+RendererSDL::~RendererSDL() {
+  destroy();
+}
+
+RendererSDL::RendererSDL(RendererSDL&& other) noexcept
+    : window(std::exchange(other.window, nullptr)),
+      renderer(std::exchange(other.renderer, nullptr)),
+      texture(std::exchange(other.texture, nullptr)),
+      owns_sdl_video(std::exchange(other.owns_sdl_video, false)),
+      scale(other.scale),
+      grid_w(other.grid_w),
+      grid_h(other.grid_h),
+      toolbar_h(other.toolbar_h),
+      win_w(other.win_w),
+      win_h(other.win_h),
+      pixels(std::move(other.pixels)) {}
+
+RendererSDL& RendererSDL::operator=(RendererSDL&& other) noexcept {
+  if (this == &other) return *this;
+
+  destroy();
+
+  window = std::exchange(other.window, nullptr);
+  renderer = std::exchange(other.renderer, nullptr);
+  texture = std::exchange(other.texture, nullptr);
+  owns_sdl_video = std::exchange(other.owns_sdl_video, false);
+  scale = other.scale;
+  grid_w = other.grid_w;
+  grid_h = other.grid_h;
+  toolbar_h = other.toolbar_h;
+  win_w = other.win_w;
+  win_h = other.win_h;
+  pixels = std::move(other.pixels);
+  return *this;
+}
+
 void RendererSDL::destroy() {
   if (texture) SDL_DestroyTexture(texture);
   if (renderer) SDL_DestroyRenderer(renderer);
   if (window) SDL_DestroyWindow(window);
+
   texture = nullptr;
   renderer = nullptr;
   window = nullptr;
-  SDL_Quit();
+
+  if (owns_sdl_video && SDL_WasInit(SDL_INIT_VIDEO) != 0u) SDL_Quit();
+  owns_sdl_video = false;
 }
 
 void RendererSDL::set_title(const std::string& title) {

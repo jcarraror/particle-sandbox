@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -41,9 +42,9 @@ struct Cell {
  */
 template <class T>
 struct Grid2D {
-  T* data{}; /**< Pointer to row-major element storage. */
-  int w{};   /**< Grid width in cells. */
-  int h{};   /**< Grid height in cells. */
+  std::span<T> cells{}; /**< Row-major storage view. */
+  int w{};              /**< Grid width in cells. */
+  int h{};              /**< Grid height in cells. */
 
   /**
    * @brief Mutable element access.
@@ -51,7 +52,7 @@ struct Grid2D {
    * @param y Y coordinate.
    * @return Reference to element at `(x, y)`.
    */
-  constexpr T& operator()(int x, int y) noexcept { return data[y * w + x]; }
+  constexpr T& operator()(int x, int y) noexcept { return cells[static_cast<std::size_t>(y * w + x)]; }
 
   /**
    * @brief Const element access.
@@ -59,7 +60,9 @@ struct Grid2D {
    * @param y Y coordinate.
    * @return Const reference to element at `(x, y)`.
    */
-  constexpr const T& operator()(int x, int y) const noexcept { return data[y * w + x]; }
+  constexpr const T& operator()(int x, int y) const noexcept {
+    return cells[static_cast<std::size_t>(y * w + x)];
+  }
 };
 
 /**
@@ -79,7 +82,7 @@ struct World {
    * @param seed RNG seed.
    * @return Constructed world or an error string.
    */
-  static std::expected<World, std::string> create(int width, int height, std::uint32_t seed);
+  [[nodiscard]] static std::expected<World, std::string> create(int width, int height, std::uint32_t seed);
 
   /**
    * @brief Returns a mutable 2D view of the cell storage.

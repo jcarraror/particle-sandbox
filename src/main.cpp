@@ -170,6 +170,5 @@ int main(int, char**) {
     ren.draw(world, brush, brush_radius, mx, my, paused);
   }
 
-  ren.destroy();
   return 0;
 }

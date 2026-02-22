@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,7 @@ struct RendererSDL {
   SDL_Window* window = nullptr;      /**< SDL window handle. */
   SDL_Renderer* renderer = nullptr;  /**< SDL hardware/software renderer. */
   SDL_Texture* texture = nullptr;    /**< Streaming texture for world pixels. */
+  bool owns_sdl_video = false;       /**< Whether this instance must call `SDL_Quit()`. */
 
   int scale = 4;      /**< Pixel scale factor from grid cell to screen. */
   int grid_w = 0;     /**< World width in cells. */
@@ -44,6 +46,15 @@ struct RendererSDL {
 
   std::vector<std::uint32_t> pixels; /**< CPU-side ARGB8888 buffer (`grid_w * grid_h`). */
 
+  RendererSDL() = default;
+  ~RendererSDL();
+
+  RendererSDL(const RendererSDL&) = delete;
+  RendererSDL& operator=(const RendererSDL&) = delete;
+
+  RendererSDL(RendererSDL&& other) noexcept;
+  RendererSDL& operator=(RendererSDL&& other) noexcept;
+
   /**
    * @brief Creates SDL resources for rendering.
    * @param grid_w World width in cells.
@@ -52,12 +63,7 @@ struct RendererSDL {
    * @param toolbar_h_px Toolbar height in pixels.
    * @return Initialized renderer object or an error string.
    */
-  static std::expected<RendererSDL, std::string> create(int grid_w, int grid_h, int scale, int toolbar_h_px = 64);
-
-  /**
-   * @brief Releases all SDL resources owned by this renderer.
-   */
-  void destroy();
+  [[nodiscard]] static std::expected<RendererSDL, std::string> create(int grid_w, int grid_h, int scale, int toolbar_h_px = 64);
 
   /**
    * @brief Updates the OS window title.
@@ -118,5 +124,11 @@ struct RendererSDL {
    * @brief Gets the set of toolbar materials and labels.
    * @return Ordered list of material buttons.
    */
-  static std::vector<MaterialButton> materials();
+  static std::span<const MaterialButton> materials();
+
+private:
+  /**
+   * @brief Releases all SDL resources owned by this renderer.
+   */
+  void destroy();
 };
