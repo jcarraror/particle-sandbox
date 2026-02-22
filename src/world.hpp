@@ -34,6 +34,7 @@ struct Cell {
   CellType type{CellType::Empty}; /**< Current material type. */
   std::uint8_t updated{0};        /**< Tick stamp used to prevent double-stepping. */
   std::int16_t temp{20};          /**< Approximate temperature in arbitrary units. */
+  std::int16_t pressure{0};       /**< Local pressure heuristic field. */
 };
 
 /**
@@ -189,4 +190,12 @@ private:
    * @param amount Temperature delta applied per neighbor.
    */
   void heat_neighbors(int x, int y, int amount);
+
+  /**
+   * @brief Performs a local thermal diffusion pass.
+   *
+   * Exchanges heat between neighboring cells using per-material thermal
+   * conductivities to smooth extreme gradients before relaxation.
+   */
+  void pass_thermal_exchange();
 };

@@ -4,6 +4,7 @@
  */
 
 #include "world.hpp"
+#include "material_props.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -146,18 +147,13 @@ void World::clear() {
 void World::generate_random_scene() {
   clear();
 
-  auto spawn_temp_for = [](CellType t) -> std::int16_t {
-    if (t == CellType::Fire) return 300;
-    if (t == CellType::Lava) return 800;
-    return 20;
-  };
-
   auto set_cell = [&](int x, int y, CellType t) {
     if (!in_bounds(x, y)) return;
     Cell& c = at(x, y);
     if (c.type == CellType::Wall && t != CellType::Wall) return;
     c.type = t;
-    c.temp = spawn_temp_for(t);
+    c.temp = sim::material_props(t).spawn_temp;
+    c.pressure = 0;
     c.updated = stamp;
   };
 
@@ -259,9 +255,8 @@ void World::paint_disc(int cx, int cy, int radius, CellType t) {
       c.type = t;
       c.updated = stamp;
 
-      if (t == CellType::Fire) c.temp = 300;
-      else if (t == CellType::Lava) c.temp = 800;
-      else c.temp = 20;
+      c.temp = sim::material_props(t).spawn_temp;
+      c.pressure = 0;
     }
   }
 }
@@ -288,6 +283,8 @@ void World::tick() {
       for (int x = w - 2; x >= 1; --x) step_cell(x, y, false);
     }
   }
+
+  pass_thermal_exchange();
 
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
