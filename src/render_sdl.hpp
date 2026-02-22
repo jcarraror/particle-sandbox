@@ -79,13 +79,15 @@ struct RendererSDL {
    * @param mouse_x Mouse X in window pixels.
    * @param mouse_y Mouse Y in window pixels.
    * @param paused Whether simulation stepping is paused.
+   * @param show_pressure_debug Whether to render pressure field visualization.
    */
   void draw(const World& world,
             CellType selected,
             int brush_radius,
             int mouse_x,
             int mouse_y,
-            bool paused);
+            bool paused,
+            bool show_pressure_debug);
 
   /**
    * @brief Converts window mouse coordinates to grid coordinates.

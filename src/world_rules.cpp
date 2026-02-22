@@ -44,6 +44,11 @@ constexpr std::int16_t kSmokeFromFireTemp = 80;
 constexpr int kLavaSelfHeatPerTick = 2;
 constexpr int kLavaNeighborHeatPerTick = 6;
 constexpr int kLavaMaxTemp = 2000;
+constexpr int kLavaWaterCoolPerNeighbor = 28;
+constexpr int kLavaWaterPressureSpike = 70;
+constexpr std::uint32_t kLavaWaterSteamBurstOddsDivisor = 2;
+constexpr int kLavaSteamBurstTempThreshold = 110;
+constexpr int kLavaSteamSpawnPressure = 180;
 constexpr int kWaterHeatAbsorbFromFire = 16;
 constexpr int kWaterHeatAbsorbFromLava = 10;
 constexpr int kWaterSteamTempThreshold = 140;
@@ -56,7 +61,9 @@ constexpr int kHighSmokePressure = 80;
 constexpr int kExtremeSmokePressure = 150;
 constexpr int kSmokeCondenseTempThreshold = 55;
 constexpr std::uint32_t kSmokeCondenseOddsDivisor = 8;
-constexpr int kLiquidPressureBiasThreshold = 20;
+constexpr int kLiquidPressureActivationThreshold = 90;
+constexpr int kLiquidPressureSpreadBonusStep = 45;
+constexpr int kLiquidMaxSpreadBonus = 3;
 constexpr std::uint32_t kLavaSmokeSpawnOddsDivisor = 80;
 constexpr std::int16_t kSmokeFromLavaTemp = 120;
 }  // namespace simcfg
@@ -193,25 +200,78 @@ bool smoke_has_escape_route(World& world, int x, int y) {
   return false;
 }
 
-int choose_liquid_lateral_dir(World& world, int x, int y, int preferred_dir) {
-  auto score_dir = [&](int dx) -> int {
-    const int nx = x + dx;
-    if (!world.in_bounds(nx, y)) return 1'000'000;
+bool liquid_is_constrained(World& world, int x, int y, bool ltr) {
+  const int dx1 = (ltr ? -1 : 1);
+  const int dx2 = -dx1;
 
-    const Cell& side = world.at(nx, y);
-    int score = static_cast<int>(side.pressure);
+  const CellType below = world.at(x, y + 1).type;
+  const CellType d1 = world.at(x + dx1, y + 1).type;
+  const CellType d2 = world.at(x + dx2, y + 1).type;
 
-    if (side.type == CellType::Empty) score -= 40;
-    else if (side.type == CellType::Smoke) score -= 20;
-    else if (side.type == CellType::Wall) score += 50;
+  const bool blocked_below = below != CellType::Empty;
+  const bool blocked_diag_1 = d1 != CellType::Empty;
+  const bool blocked_diag_2 = d2 != CellType::Empty;
+  return blocked_below && blocked_diag_1 && blocked_diag_2;
+}
 
-    return score;
-  };
+int choose_liquid_spread_dir(World& world, int x, int y, bool ltr) {
+  const int preferred = (world.rng.coin() ? 1 : -1);
+  (void)x;
+  (void)y;
+  (void)ltr;
+  return preferred;
+}
 
-  const int score_pref = score_dir(preferred_dir);
-  const int score_alt = score_dir(-preferred_dir);
-  if (std::abs(score_pref - score_alt) < simcfg::kLiquidPressureBiasThreshold) return preferred_dir;
-  return (score_pref < score_alt) ? preferred_dir : -preferred_dir;
+int liquid_pressure_spread_bonus(World& world, int x, int y, bool ltr) {
+  const Cell& c = world.at(x, y);
+  if (!liquid_is_constrained(world, x, y, ltr)) return 0;
+  if (c.pressure < simcfg::kLiquidPressureActivationThreshold) return 0;
+
+  const int over = c.pressure - simcfg::kLiquidPressureActivationThreshold;
+  const int bonus = 1 + (over / simcfg::kLiquidPressureSpreadBonusStep);
+  return std::clamp(bonus, 0, simcfg::kLiquidMaxSpreadBonus);
+}
+
+void trigger_lava_water_contact(World& world, int x, int y) {
+  Cell& lava = world.at(x, y);
+  int contacts = 0;
+
+  for_each_neighbor(world, x, y, [&](int nx, int ny, Cell& n) {
+    if (n.type != CellType::Water) return;
+    ++contacts;
+
+    n.temp = static_cast<std::int16_t>(clampi(
+        n.temp + simcfg::kWaterHeatAbsorbFromLava + simcfg::kWaterHeatAbsorbFromFire,
+        simcfg::kAmbientTemp,
+        simcfg::kMaxNeighborHeatTemp));
+    n.pressure = static_cast<std::int16_t>(clampi(
+        static_cast<int>(n.pressure) + simcfg::kLavaWaterPressureSpike, 0, 240));
+
+    const bool hot_enough = n.temp >= simcfg::kLavaSteamBurstTempThreshold;
+    const bool burst = (world.rng.next_u32() % simcfg::kLavaWaterSteamBurstOddsDivisor) == 0u;
+    if (!hot_enough || !burst) return;
+
+    n.type = CellType::Smoke;  // Steam proxy.
+    n.temp = simcfg::kSteamTemp;
+    n.pressure = simcfg::kLavaSteamSpawnPressure;
+    n.updated = world.stamp;
+
+    if (world.in_bounds(nx, ny - 1)) {
+      Cell& above = world.at(nx, ny - 1);
+      if (above.type == CellType::Empty) {
+        above.type = CellType::Smoke;
+        above.temp = simcfg::kSteamTemp;
+        above.pressure = simcfg::kLavaSteamSpawnPressure;
+        above.updated = world.stamp;
+      }
+    }
+  });
+
+  if (contacts == 0) return;
+  lava.temp = static_cast<std::int16_t>(clampi(
+      lava.temp - contacts * simcfg::kLavaWaterCoolPerNeighbor,
+      simcfg::kAmbientTemp,
+      simcfg::kLavaMaxTemp));
 }
 
 }  // namespace
@@ -284,9 +344,10 @@ void World::step_water(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
 
-  const int dir = choose_liquid_lateral_dir(*this, x, y, rng.coin() ? 1 : -1);
+  const int dir = choose_liquid_spread_dir(*this, x, y, ltr);
 
-  for (int i = 1; i <= simcfg::kWaterSpread; ++i) {
+  const int max_spread = simcfg::kWaterSpread + liquid_pressure_spread_bonus(*this, x, y, ltr);
+  for (int i = 1; i <= max_spread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
   }
 }
@@ -310,9 +371,10 @@ void World::step_oil(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
 
-  const int dir = choose_liquid_lateral_dir(*this, x, y, rng.coin() ? 1 : -1);
+  const int dir = choose_liquid_spread_dir(*this, x, y, ltr);
 
-  for (int i = 1; i <= simcfg::kOilSpread; ++i) {
+  const int max_spread = simcfg::kOilSpread + liquid_pressure_spread_bonus(*this, x, y, ltr);
+  for (int i = 1; i <= max_spread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
   }
 }
@@ -438,6 +500,7 @@ void World::step_lava(int x, int y, bool ltr) {
       clampi(c.temp + simcfg::kLavaSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kLavaMaxTemp));
   heat_neighbors(x, y, simcfg::kLavaNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
+  trigger_lava_water_contact(*this, x, y);
 
   if (try_move(x, y, x, y + 1)) return;
 

@@ -28,6 +28,8 @@ constexpr int kLiquidOpenSideRelief = 8;
 constexpr int kLiquidHeatBonusStep = 60;
 constexpr int kLiquidHeatBonusAmount = 4;
 constexpr int kMaxLiquidDepthSample = 8;
+constexpr int kPressureDampingNumerator = 1;
+constexpr int kPressureDampingDenominator = 3;
 
 bool is_gas_like(CellType t) {
   return t == CellType::Smoke;
@@ -100,7 +102,11 @@ void World::pass_pressure_update() {
           p += ((static_cast<int>(c.temp) - kAmbientTemp) / kHeatBonusStep) * kHeatBonusAmount;
         }
 
-        c.pressure = static_cast<std::int16_t>(std::clamp(p, kPressureMin, kPressureMax));
+        const int target = std::clamp(p, kPressureMin, kPressureMax);
+        const int blended =
+            (static_cast<int>(c.pressure) * kPressureDampingNumerator + target * (kPressureDampingDenominator - kPressureDampingNumerator)) /
+            kPressureDampingDenominator;
+        c.pressure = static_cast<std::int16_t>(std::clamp(blended, kPressureMin, kPressureMax));
         continue;
       }
 
@@ -125,7 +131,11 @@ void World::pass_pressure_update() {
           p += ((static_cast<int>(c.temp) - kAmbientTemp) / kLiquidHeatBonusStep) * kLiquidHeatBonusAmount;
         }
 
-        c.pressure = static_cast<std::int16_t>(std::clamp(p, kPressureMin, kPressureMax));
+        const int target = std::clamp(p, kPressureMin, kPressureMax);
+        const int blended =
+            (static_cast<int>(c.pressure) * kPressureDampingNumerator + target * (kPressureDampingDenominator - kPressureDampingNumerator)) /
+            kPressureDampingDenominator;
+        c.pressure = static_cast<std::int16_t>(std::clamp(blended, kPressureMin, kPressureMax));
         continue;
       }
 

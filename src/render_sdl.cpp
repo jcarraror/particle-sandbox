@@ -7,6 +7,7 @@
 
 #include <SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <string>
@@ -76,6 +77,20 @@ static std::uint32_t color_for(const Cell& c) {
                                      static_cast<std::uint8_t>(50 + h / 2), 12);
     default: return argb(255, 255, 0, 255);
   }
+}
+
+static std::uint32_t color_for_pressure_debug(const Cell& c) {
+  if (c.type == CellType::Empty) return argb(255, 0, 0, 0);
+  if (c.type == CellType::Wall) return argb(255, 70, 70, 78);
+
+  const int p = std::clamp<int>(c.pressure, 0, 240);
+  const std::uint8_t lo = static_cast<std::uint8_t>(std::min(255, p * 2));
+  const std::uint8_t hi = static_cast<std::uint8_t>(std::min(255, std::max(0, (p - 96) * 2)));
+
+  const std::uint8_t r = static_cast<std::uint8_t>(30 + hi);
+  const std::uint8_t g = static_cast<std::uint8_t>(40 + lo / 2);
+  const std::uint8_t b = static_cast<std::uint8_t>(70 + (255 - lo) / 2);
+  return argb(255, r, g, b);
 }
 
 /**
@@ -483,10 +498,13 @@ void RendererSDL::draw(const World& world,
                        int brush_radius,
                        int mouse_x,
                        int mouse_y,
-                       bool paused) {
+                       bool paused,
+                       bool show_pressure_debug) {
   for (int y = 0; y < grid_h; ++y) {
     for (int x = 0; x < grid_w; ++x) {
-      pixels[static_cast<std::size_t>(y * grid_w + x)] = color_for(world.at(x, y));
+      const Cell& c = world.at(x, y);
+      pixels[static_cast<std::size_t>(y * grid_w + x)] =
+          show_pressure_debug ? color_for_pressure_debug(c) : color_for(c);
     }
   }
   SDL_UpdateTexture(texture, nullptr, pixels.data(), grid_w * int(sizeof(std::uint32_t)));
@@ -568,7 +586,8 @@ void RendererSDL::draw(const World& world,
     }
   } else {
     hover_text = "ACTIVE: " + mat_name(selected) + "  BRUSH " + std::to_string(brush_radius) +
-                 (paused ? "  [PAUSED]" : "");
+                 (paused ? "  [PAUSED]" : "") +
+                 (show_pressure_debug ? "  [PRESSURE]" : "");
   }
 
   const int panel_x = tools_right + 16;

@@ -78,6 +78,7 @@ int main(int, char**) {
 
   bool running = true;
   bool paused = false;
+  bool show_pressure_debug = false;
 
   CellType brush = CellType::Sand;
   int brush_radius = 4;
@@ -104,6 +105,7 @@ int main(int, char**) {
           case SDLK_SPACE: paused = !paused; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_c: world.clear(); break;
           case SDLK_r: world.generate_random_scene(); break;
+          case SDLK_p: show_pressure_debug = !show_pressure_debug; break;
 
           case SDLK_1: brush = CellType::Sand; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_2: brush = CellType::Water; update_title(ren, brush, brush_radius, paused); break;
@@ -170,7 +172,7 @@ int main(int, char**) {
 
     if (!paused) world.tick();
 
-    ren.draw(world, brush, brush_radius, mx, my, paused);
+    ren.draw(world, brush, brush_radius, mx, my, paused, show_pressure_debug);
   }
 
   return 0;
