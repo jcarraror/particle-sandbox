@@ -6,6 +6,7 @@
 #include "world.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 /**
@@ -18,6 +19,42 @@
 static constexpr int clampi(int v, int lo, int hi) {
   return (v < lo) ? lo : (v > hi ? hi : v);
 }
+
+namespace {
+
+struct NeighborOffset {
+  int dx;
+  int dy;
+};
+
+constexpr std::array<NeighborOffset, 8> kMooreOffsets{{
+    {-1, -1}, {0, -1}, {1, -1},
+    {-1, 0},           {1, 0},
+    {-1, 1},  {0, 1},  {1, 1},
+}};
+
+template <class Fn>
+void for_each_neighbor(World& world, int x, int y, Fn&& fn) {
+  for (const auto [dx, dy] : kMooreOffsets) {
+    const int nx = x + dx;
+    const int ny = y + dy;
+    if (!world.in_bounds(nx, ny)) continue;
+    fn(nx, ny, world.at(nx, ny));
+  }
+}
+
+void ignite_oil_neighbors(World& world, int x, int y) {
+  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
+    if (n.type != CellType::Oil) return;
+    if ((world.rng.next_u32() % 7u) != 0u) return;
+
+    n.type = CellType::Fire;
+    n.temp = 300;
+    n.updated = world.stamp;
+  });
+}
+
+}  // namespace
 
 /**
  * @brief Constructs a world and initializes immutable border walls.
@@ -345,19 +382,10 @@ void World::step_smoke(int x, int y, bool ltr) {
  * @param amount Heat delta to add per affected neighbor.
  */
 void World::heat_neighbors(int x, int y, int amount) {
-  for (int oy = -1; oy <= 1; ++oy) {
-    for (int ox = -1; ox <= 1; ++ox) {
-      if (ox == 0 && oy == 0) continue;
-      const int nx = x + ox;
-      const int ny = y + oy;
-      if (!in_bounds(nx, ny)) continue;
-
-      Cell& n = at(nx, ny);
-      if (n.type == CellType::Wall || n.type == CellType::Empty) continue;
-
-      n.temp = static_cast<std::int16_t>(clampi(n.temp + amount, -50, 2000));
-    }
-  }
+  for_each_neighbor(*this, x, y, [&](int, int, Cell& n) {
+    if (n.type == CellType::Wall || n.type == CellType::Empty) return;
+    n.temp = static_cast<std::int16_t>(clampi(n.temp + amount, -50, 2000));
+  });
 }
 
 /**
@@ -376,21 +404,7 @@ void World::step_fire(int x, int y) {
   Cell& c = at(x, y);
   c.temp = static_cast<std::int16_t>(clampi(c.temp + 5, 20, 1200));
   heat_neighbors(x, y, 3);
-
-  for (int oy = -1; oy <= 1; ++oy) {
-    for (int ox = -1; ox <= 1; ++ox) {
-      const int nx = x + ox;
-      const int ny = y + oy;
-      if (!in_bounds(nx, ny)) continue;
-
-      Cell& n = at(nx, ny);
-      if (n.type == CellType::Oil && (rng.next_u32() % 7u == 0u)) {
-        n.type = CellType::Fire;
-        n.temp = 300;
-        n.updated = stamp;
-      }
-    }
-  }
+  ignite_oil_neighbors(*this, x, y);
 
   const std::uint32_t r = rng.next_u32();
   if ((r % 25u) == 0u) {
@@ -406,10 +420,11 @@ void World::step_fire(int x, int y) {
 }
 
 /**
- * @brief Lava rule: just like a liquid that flows and emits occasional smoke.
+ * @brief Lava rule: hot flowing liquid that can ignite and emit smoke.
  *
  * Behavior summary:
  * - Self-heats and strongly warms nearby cells.
+ * - Has a random chance to ignite neighboring oil into fire.
  * - Tries to fall/slide similarly to dense liquid.
  * - Occasionally spawns smoke above when space is available.
  *
@@ -421,6 +436,7 @@ void World::step_lava(int x, int y, bool ltr) {
   Cell& c = at(x, y);
   c.temp = static_cast<std::int16_t>(clampi(c.temp + 2, 20, 2000));
   heat_neighbors(x, y, 6);
+  ignite_oil_neighbors(*this, x, y);
 
   if (try_move(x, y, x, y + 1)) return;
 
