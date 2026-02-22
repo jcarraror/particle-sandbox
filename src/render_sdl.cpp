@@ -234,6 +234,37 @@ static std::uint32_t color_for_pressure_debug(const Cell& c) {
     const int v = std::clamp((p * 255) / std::max(1, max_p), 0, 255);
     return static_cast<std::uint8_t>(v);
   };
+  auto smoke_pressure_color = [](std::uint8_t t) -> std::uint32_t {
+    return argb(255,
+                static_cast<std::uint8_t>(90 + (t * 165) / 255),
+                static_cast<std::uint8_t>(70 + (t * 185) / 255),
+                static_cast<std::uint8_t>(35 + (t * 90) / 255));
+  };
+  auto liquid_pressure_color = [](std::uint8_t t) -> std::uint32_t {
+    return argb(255,
+                static_cast<std::uint8_t>(10 + (t * 120) / 255),
+                static_cast<std::uint8_t>(40 + (t * 190) / 255),
+                static_cast<std::uint8_t>(80 + (t * 175) / 255));
+  };
+  auto lava_pressure_color = [](std::uint8_t t) -> std::uint32_t {
+    const std::uint8_t t2 = static_cast<std::uint8_t>((int(t) * int(t)) / 255);
+    return argb(255,
+                static_cast<std::uint8_t>(24 + (t * 210) / 255),
+                static_cast<std::uint8_t>(6 + (t2 * 180) / 255),
+                static_cast<std::uint8_t>(4 + (t2 * 36) / 255));
+  };
+  auto fire_pressure_color = [](std::uint8_t t) -> std::uint32_t {
+    return argb(255,
+                static_cast<std::uint8_t>(120 + (t * 135) / 255),
+                static_cast<std::uint8_t>(30 + (t * 140) / 255),
+                static_cast<std::uint8_t>(10 + (t * 40) / 255));
+  };
+  auto sand_pressure_color = [](std::uint8_t t) -> std::uint32_t {
+    return argb(255,
+                static_cast<std::uint8_t>(80 + (t * 120) / 255),
+                static_cast<std::uint8_t>(70 + (t * 110) / 255),
+                static_cast<std::uint8_t>(45 + (t * 60) / 255));
+  };
 
   const PressureDebugStyle style = pressure_debug_style(c.type);
   const int p = std::clamp<int>(c.pressure, 0, 240);
@@ -246,41 +277,25 @@ static std::uint32_t color_for_pressure_debug(const Cell& c) {
     case PressurePalette::SmokeWarm: {
       // Gas pressure: warm yellow/white for trapped steam pockets.
       const std::uint8_t t = norm255(p, style.max_pressure);
-      const std::uint8_t r = static_cast<std::uint8_t>(90 + (t * 165) / 255);
-      const std::uint8_t g = static_cast<std::uint8_t>(70 + (t * 185) / 255);
-      const std::uint8_t b = static_cast<std::uint8_t>(35 + (t * 90) / 255);
-      return argb(255, r, g, b);
+      return smoke_pressure_color(t);
     }
     case PressurePalette::LiquidCool: {
       // Liquid pressure: deep blue -> cyan -> pale white.
       const std::uint8_t t = norm255(p, style.max_pressure);
-      const std::uint8_t r = static_cast<std::uint8_t>(10 + (t * 120) / 255);
-      const std::uint8_t g = static_cast<std::uint8_t>(40 + (t * 190) / 255);
-      const std::uint8_t b = static_cast<std::uint8_t>(80 + (t * 175) / 255);
-      return argb(255, r, g, b);
+      return liquid_pressure_color(t);
     }
     case PressurePalette::LavaHot: {
       // Lava pressure: dark maroon -> red -> orange -> yellow
       const std::uint8_t t = norm255(p, style.max_pressure);
-      const std::uint8_t t2 = static_cast<std::uint8_t>((int(t) * int(t)) / 255);
-      const std::uint8_t r = static_cast<std::uint8_t>(24 + (t * 210) / 255);
-      const std::uint8_t g = static_cast<std::uint8_t>(6 + (t2 * 180) / 255);
-      const std::uint8_t b = static_cast<std::uint8_t>(4 + (t2 * 36) / 255);
-      return argb(255, r, g, b);
+      return lava_pressure_color(t);
     }
     case PressurePalette::FireWarm: {
       const std::uint8_t t = norm255(p, style.max_pressure);
-      return argb(255,
-                  static_cast<std::uint8_t>(120 + (t * 135) / 255),
-                  static_cast<std::uint8_t>(30 + (t * 140) / 255),
-                  static_cast<std::uint8_t>(10 + (t * 40) / 255));
+      return fire_pressure_color(t);
     }
     case PressurePalette::SandEarth: {
       const std::uint8_t t = norm255(p, style.max_pressure);
-      return argb(255,
-                  static_cast<std::uint8_t>(80 + (t * 120) / 255),
-                  static_cast<std::uint8_t>(70 + (t * 110) / 255),
-                  static_cast<std::uint8_t>(45 + (t * 60) / 255));
+      return sand_pressure_color(t);
     }
     default:
       return argb(255, 255, 0, 255);
