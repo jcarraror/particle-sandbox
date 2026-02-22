@@ -14,5 +14,6 @@ namespace pressure_detail {
 
 [[nodiscard]] std::int16_t damp_pressure(std::int16_t current, int target) noexcept;
 
-}  // namespace pressure_detail
+void relax_dense_pressure(World& world);
 
+}  // namespace pressure_detail

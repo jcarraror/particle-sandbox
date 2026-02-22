@@ -44,4 +44,6 @@ void World::pass_pressure_update() {
       c.pressure = 0;
     }
   }
+
+  pressure_detail::relax_dense_pressure(*this);
 }
