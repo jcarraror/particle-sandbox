@@ -21,6 +21,13 @@ constexpr int kOpenRelief = 12;
 constexpr int kNoEscapeBonus = 30;
 constexpr int kHeatBonusStep = 40;
 constexpr int kHeatBonusAmount = 6;
+constexpr int kLiquidDepthPressurePerCell = 18;
+constexpr int kLiquidBlockedBelowBonus = 28;
+constexpr int kLiquidWallSideBonus = 10;
+constexpr int kLiquidOpenSideRelief = 8;
+constexpr int kLiquidHeatBonusStep = 60;
+constexpr int kLiquidHeatBonusAmount = 4;
+constexpr int kMaxLiquidDepthSample = 8;
 
 bool is_gas_like(CellType t) {
   return t == CellType::Smoke;
@@ -34,6 +41,19 @@ bool is_open_for_smoke(CellType t) {
   return t == CellType::Empty || t == CellType::Smoke;
 }
 
+bool supports_liquid(CellType t) {
+  return t != CellType::Empty && t != CellType::Smoke;
+}
+
+int liquid_column_depth(const World& world, int x, int y, CellType fluid) {
+  int depth = 0;
+  for (int ny = y; ny < world.h - 1 && depth < kMaxLiquidDepthSample; ++ny) {
+    if (world.at(x, ny).type != fluid) break;
+    ++depth;
+  }
+  return depth;
+}
+
 }  // namespace
 
 void World::pass_pressure_update() {
@@ -41,50 +61,75 @@ void World::pass_pressure_update() {
     for (int x = 1; x < w - 1; ++x) {
       Cell& c = at(x, y);
 
-      if (c.type != CellType::Smoke) {
-        c.pressure = 0;
+      if (c.type == CellType::Smoke) {
+        int p = 0;
+
+        const CellType up = at(x, y - 1).type;
+        if (!is_open_for_smoke(up)) p += kBlockedAbovePenalty;
+        else p -= kOpenRelief;
+
+        const CellType down = at(x, y + 1).type;
+        if (!is_open_for_smoke(down)) p += kBlockedSidePenalty;
+        else p -= kOpenRelief / 2;
+
+        const CellType left = at(x - 1, y).type;
+        const CellType right = at(x + 1, y).type;
+
+        auto accumulate_side = [&](CellType t) {
+          if (t == CellType::Empty) {
+            p -= kOpenRelief;
+          } else if (is_gas_like(t)) {
+            p += kGasNeighborPenalty;
+          } else if (is_fluid_like(t)) {
+            p += kFluidSidePenalty;
+          } else {
+            p += kBlockedSidePenalty;
+          }
+        };
+
+        accumulate_side(left);
+        accumulate_side(right);
+
+        const bool no_escape =
+            !is_open_for_smoke(up) &&
+            !is_open_for_smoke(at(x - 1, y - 1).type) &&
+            !is_open_for_smoke(at(x + 1, y - 1).type);
+        if (no_escape) p += kNoEscapeBonus;
+
+        if (c.temp > kAmbientTemp) {
+          p += ((static_cast<int>(c.temp) - kAmbientTemp) / kHeatBonusStep) * kHeatBonusAmount;
+        }
+
+        c.pressure = static_cast<std::int16_t>(std::clamp(p, kPressureMin, kPressureMax));
         continue;
       }
 
-      int p = 0;
+      if (c.type == CellType::Water || c.type == CellType::Oil) {
+        int p = 0;
+        const CellType fluid = c.type;
 
-      const CellType up = at(x, y - 1).type;
-      if (!is_open_for_smoke(up)) p += kBlockedAbovePenalty;
-      else p -= kOpenRelief;
+        p += liquid_column_depth(*this, x, y, fluid) * kLiquidDepthPressurePerCell;
 
-      const CellType down = at(x, y + 1).type;
-      if (!is_open_for_smoke(down)) p += kBlockedSidePenalty;
-      else p -= kOpenRelief / 2;
+        if (supports_liquid(at(x, y + 1).type)) p += kLiquidBlockedBelowBonus;
 
-      const CellType left = at(x - 1, y).type;
-      const CellType right = at(x + 1, y).type;
+        auto side_pressure = [&](CellType t) {
+          if (t == CellType::Empty || t == CellType::Smoke) return -kLiquidOpenSideRelief;
+          if (t == CellType::Wall) return kLiquidWallSideBonus;
+          return 0;
+        };
 
-      auto accumulate_side = [&](CellType t) {
-        if (t == CellType::Empty) {
-          p -= kOpenRelief;
-        } else if (is_gas_like(t)) {
-          p += kGasNeighborPenalty;
-        } else if (is_fluid_like(t)) {
-          p += kFluidSidePenalty;
-        } else {
-          p += kBlockedSidePenalty;
+        p += side_pressure(at(x - 1, y).type);
+        p += side_pressure(at(x + 1, y).type);
+
+        if (c.temp > kAmbientTemp) {
+          p += ((static_cast<int>(c.temp) - kAmbientTemp) / kLiquidHeatBonusStep) * kLiquidHeatBonusAmount;
         }
-      };
 
-      accumulate_side(left);
-      accumulate_side(right);
-
-      const bool no_escape =
-          !is_open_for_smoke(up) &&
-          !is_open_for_smoke(at(x - 1, y - 1).type) &&
-          !is_open_for_smoke(at(x + 1, y - 1).type);
-      if (no_escape) p += kNoEscapeBonus;
-
-      if (c.temp > kAmbientTemp) {
-        p += ((static_cast<int>(c.temp) - kAmbientTemp) / kHeatBonusStep) * kHeatBonusAmount;
+        c.pressure = static_cast<std::int16_t>(std::clamp(p, kPressureMin, kPressureMax));
+        continue;
       }
 
-      c.pressure = static_cast<std::int16_t>(std::clamp(p, kPressureMin, kPressureMax));
+      c.pressure = 0;
     }
   }
 }

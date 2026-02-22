@@ -56,6 +56,7 @@ constexpr int kHighSmokePressure = 80;
 constexpr int kExtremeSmokePressure = 150;
 constexpr int kSmokeCondenseTempThreshold = 55;
 constexpr std::uint32_t kSmokeCondenseOddsDivisor = 8;
+constexpr int kLiquidPressureBiasThreshold = 20;
 constexpr std::uint32_t kLavaSmokeSpawnOddsDivisor = 80;
 constexpr std::int16_t kSmokeFromLavaTemp = 120;
 }  // namespace simcfg
@@ -134,6 +135,7 @@ bool try_evaporate_water(World& world, int x, int y) {
 
   c.type = CellType::Smoke;
   c.temp = simcfg::kSteamTemp;
+  c.pressure = simcfg::kExtremeSmokePressure;
   c.updated = world.stamp;
   return true;
 }
@@ -189,6 +191,27 @@ bool smoke_has_escape_route(World& world, int x, int y) {
     if (t == CellType::Empty || t == CellType::Smoke) return true;
   }
   return false;
+}
+
+int choose_liquid_lateral_dir(World& world, int x, int y, int preferred_dir) {
+  auto score_dir = [&](int dx) -> int {
+    const int nx = x + dx;
+    if (!world.in_bounds(nx, y)) return 1'000'000;
+
+    const Cell& side = world.at(nx, y);
+    int score = static_cast<int>(side.pressure);
+
+    if (side.type == CellType::Empty) score -= 40;
+    else if (side.type == CellType::Smoke) score -= 20;
+    else if (side.type == CellType::Wall) score += 50;
+
+    return score;
+  };
+
+  const int score_pref = score_dir(preferred_dir);
+  const int score_alt = score_dir(-preferred_dir);
+  if (std::abs(score_pref - score_alt) < simcfg::kLiquidPressureBiasThreshold) return preferred_dir;
+  return (score_pref < score_alt) ? preferred_dir : -preferred_dir;
 }
 
 }  // namespace
@@ -261,7 +284,7 @@ void World::step_water(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
 
-  const int dir = (rng.coin() ? 1 : -1);
+  const int dir = choose_liquid_lateral_dir(*this, x, y, rng.coin() ? 1 : -1);
 
   for (int i = 1; i <= simcfg::kWaterSpread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
@@ -287,7 +310,7 @@ void World::step_oil(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx1, y + 1)) return;
   if (try_move(x, y, x + dx2, y + 1)) return;
 
-  const int dir = (rng.coin() ? 1 : -1);
+  const int dir = choose_liquid_lateral_dir(*this, x, y, rng.coin() ? 1 : -1);
 
   for (int i = 1; i <= simcfg::kOilSpread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
