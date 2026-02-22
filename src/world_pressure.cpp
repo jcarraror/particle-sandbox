@@ -47,9 +47,9 @@ bool supports_liquid(CellType t) {
   return t != CellType::Empty && t != CellType::Smoke;
 }
 
-int liquid_column_depth(const World& world, int x, int y, CellType fluid) {
+int liquid_overburden_depth(const World& world, int x, int y, CellType fluid) {
   int depth = 0;
-  for (int ny = y; ny < world.h - 1 && depth < kMaxLiquidDepthSample; ++ny) {
+  for (int ny = y - 1; ny >= 1 && depth < kMaxLiquidDepthSample; --ny) {
     if (world.at(x, ny).type != fluid) break;
     ++depth;
   }
@@ -114,7 +114,7 @@ void World::pass_pressure_update() {
         int p = 0;
         const CellType fluid = c.type;
 
-        p += liquid_column_depth(*this, x, y, fluid) * kLiquidDepthPressurePerCell;
+        p += liquid_overburden_depth(*this, x, y, fluid) * kLiquidDepthPressurePerCell;
 
         if (supports_liquid(at(x, y + 1).type)) p += kLiquidBlockedBelowBonus;
 
