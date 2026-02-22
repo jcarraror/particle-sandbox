@@ -814,6 +814,13 @@ void RendererSDL::draw(const World& world,
 
   if (show_pressure_debug) {
     std::string legend = "PRESSURE: Y=SMOKE  C=LIQ  O=LAVA";
+    int gx = 0;
+    int gy = 0;
+    if (mouse_to_grid(mouse_x, mouse_y, gx, gy)) {
+      const Cell& hc = world.at(gx, gy);
+      legend = "CELL " + mat_name(hc.type) + " T" + std::to_string(static_cast<int>(hc.temp)) +
+               " P" + std::to_string(static_cast<int>(hc.pressure));
+    }
     const int legend_max_chars = std::max(0, (status_panel.w - (2 * kToolbarLayout.panel_inset)) / 6);
     if (static_cast<int>(legend.size()) > legend_max_chars) {
       legend.resize(static_cast<std::size_t>(legend_max_chars));

@@ -1,6 +1,6 @@
 /**
  * @file world_pressure_dense.cpp
- * @brief Dense-material pressure target computation (water/oil/lava).
+ * @brief Dense-material pressure target computation (sand/water/oil/lava).
  */
 
 #include "world_pressure_internal.hpp"
@@ -21,6 +21,14 @@ constexpr int kLiquidWallSideBonus = 10;
 constexpr int kLiquidOpenSideRelief = 8;
 constexpr int kLiquidHeatBonusStep = 60;
 constexpr int kLiquidHeatBonusAmount = 4;
+
+constexpr int kSandDepthPressurePerCell = 20;
+constexpr int kSandColumnLoadPressurePerUnit = 6;
+constexpr int kSandBlockedBelowBonus = 18;
+constexpr int kSandWallSideBonus = 6;
+constexpr int kSandOpenSideRelief = 4;
+constexpr int kSandHeatBonusStep = 100;
+constexpr int kSandHeatBonusAmount = 0;
 
 constexpr int kLavaDepthPressurePerCell = 22;
 constexpr int kLavaColumnLoadPressurePerUnit = 10;
@@ -100,6 +108,16 @@ int same_material_overburden_depth(const World& world, int x, int y, CellType ma
 
 DensePressureCoeffs coeffs_for_dense(CellType t) {
   switch (t) {
+    case CellType::Sand:
+      return DensePressureCoeffs{
+          .same_material_depth_per_cell = kSandDepthPressurePerCell,
+          .overburden_per_unit = kSandColumnLoadPressurePerUnit,
+          .blocked_below_bonus = kSandBlockedBelowBonus,
+          .wall_side_bonus = kSandWallSideBonus,
+          .open_side_relief = kSandOpenSideRelief,
+          .heat_bonus_step = kSandHeatBonusStep,
+          .heat_bonus_amount = kSandHeatBonusAmount,
+      };
     case CellType::Water:
     case CellType::Oil:
       return DensePressureCoeffs{
@@ -131,7 +149,7 @@ DensePressureCoeffs coeffs_for_dense(CellType t) {
 }  // namespace
 
 bool is_dense_pressure_material(CellType t) noexcept {
-  return t == CellType::Water || t == CellType::Oil || t == CellType::Lava;
+  return t == CellType::Sand || t == CellType::Water || t == CellType::Oil || t == CellType::Lava;
 }
 
 int compute_dense_pressure_target(const World& world, int x, int y, const Cell& c) {
