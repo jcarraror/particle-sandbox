@@ -73,6 +73,11 @@ struct VerticalLoadProps {
   std::uint8_t load_units{};
 };
 
+struct DenseRelaxProps {
+  std::uint8_t source_weight{};   // How strongly this material contributes pressure to neighbors.
+  std::uint8_t receive_weight{};  // 0 means no relaxation writeback for this material.
+};
+
 // Vertical load transmission used by dense-pressure overburden.
 // heuristic "load units", not physical masses.
 constexpr std::array<VerticalLoadProps, kCellTypeCount> kVerticalLoadProps{{
@@ -90,17 +95,26 @@ constexpr VerticalLoadProps vertical_load_props(CellType t) noexcept {
   return kVerticalLoadProps[cell_type_index(t)];
 }
 
+// Dense-pressure relaxation properties (field propagation, not movement behavior).
+// Any loaded dense-ish material can contribute source pressure; only selected materials
+// receive smoothed pressure updates to preserve sandbox liquid motion feel.
+constexpr std::array<DenseRelaxProps, kCellTypeCount> kDenseRelaxProps{{
+    {0, 0},  // Empty
+    {3, 2},  // Wall / crust: strong bridge and receives to transmit into lava
+    {2, 2},  // Sand
+    {2, 0},  // Water: contributes load but no relaxed writeback
+    {2, 0},  // Oil: contributes load but no relaxed writeback
+    {0, 0},  // Fire
+    {0, 0},  // Smoke
+    {3, 3},  // Lava: strongest dense receiver/transmitter
+}};
+
+constexpr DenseRelaxProps dense_relax_props(CellType t) noexcept {
+  return kDenseRelaxProps[cell_type_index(t)];
+}
+
 bool supports_dense(CellType t) noexcept {
   return t != CellType::Empty && t != CellType::Smoke;
-}
-
-bool contributes_dense_relaxation_load(CellType t) noexcept {
-  return t == CellType::Lava || t == CellType::Sand || t == CellType::Water ||
-         t == CellType::Oil || t == CellType::Wall;
-}
-
-bool receives_dense_relaxation(CellType t) noexcept {
-  return t == CellType::Lava || t == CellType::Sand || t == CellType::Wall;
 }
 
 int vertical_overburden_load(const World& world, int x, int y) {
@@ -213,20 +227,24 @@ void relax_dense_pressure(World& world) {
       next[i] = world.cells[i].pressure;
     }
 
-    auto maybe_add = [&](int nx, int ny, int weight, int& accum, int& total_w) {
+    auto maybe_add = [&](int nx, int ny, int directional_weight, int& accum, int& total_w) {
       const Cell& n = world.at(nx, ny);
-      if (!contributes_dense_relaxation_load(n.type)) return;
-      accum += static_cast<int>(n.pressure) * weight;
-      total_w += weight;
+      const DenseRelaxProps rp = dense_relax_props(n.type);
+      if (rp.source_weight == 0) return;
+      const int w = directional_weight * static_cast<int>(rp.source_weight);
+      accum += static_cast<int>(n.pressure) * w;
+      total_w += w;
     };
 
     for (int y = 1; y < world.h - 1; ++y) {
       for (int x = 1; x < world.w - 1; ++x) {
         Cell& c = world.at(x, y);
-        if (!receives_dense_relaxation(c.type)) continue;
+        const DenseRelaxProps self_props = dense_relax_props(c.type);
+        if (self_props.receive_weight == 0) continue;
 
-        int accum = static_cast<int>(c.pressure) * kDenseRelaxSelfWeight;
-        int total_w = kDenseRelaxSelfWeight;
+        const int self_w = kDenseRelaxSelfWeight * static_cast<int>(self_props.receive_weight);
+        int accum = static_cast<int>(c.pressure) * self_w;
+        int total_w = self_w;
 
         // Downstream cells should feel load from above more strongly than the inverse.
         maybe_add(x, y - 1, kDenseRelaxUpWeight, accum, total_w);
@@ -248,7 +266,7 @@ void relax_dense_pressure(World& world) {
     for (int y = 1; y < world.h - 1; ++y) {
       for (int x = 1; x < world.w - 1; ++x) {
         Cell& c = world.at(x, y);
-        if (!receives_dense_relaxation(c.type)) continue;
+        if (dense_relax_props(c.type).receive_weight == 0) continue;
         c.pressure = next[static_cast<std::size_t>(y * world.w + x)];
       }
     }
