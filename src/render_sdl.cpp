@@ -14,6 +14,154 @@
 #include <utility>
 #include <vector>
 
+static std::uint32_t argb(std::uint8_t a, std::uint8_t r, std::uint8_t g, std::uint8_t b);
+
+namespace {
+
+constexpr std::size_t kCellTypeCount = 8;
+
+constexpr std::size_t cell_type_index(CellType t) noexcept {
+  return static_cast<std::size_t>(t);
+}
+
+enum class ColorModel : std::uint8_t {
+  Solid,
+  WaterShimmer,
+  SmokeSteam,
+  FireGlow,
+  LavaGlow,
+};
+
+struct MaterialColorStyle {
+  ColorModel model{ColorModel::Solid};
+  std::uint8_t r{};
+  std::uint8_t g{};
+  std::uint8_t b{};
+  std::int16_t swatch_temp{20};
+};
+
+enum class PressurePalette : std::uint8_t {
+  Empty,
+  NeutralWall,
+  SmokeWarm,
+  LiquidCool,
+  LavaHot,
+  FireWarm,
+  SandEarth,
+  Fallback,
+};
+
+struct PressureDebugStyle {
+  PressurePalette palette{PressurePalette::Fallback};
+  int max_pressure{240};
+};
+
+struct ToolbarLayout {
+  int pad{12};
+  int gap{10};
+  int button_margin_y{12};
+  int action_button_width{124};
+  int panel_gap{16};
+  int panel_min_width{120};
+  int panel_inset{8};
+  int panel_top_band_h{8};
+  int material_strip_h{6};
+  int status_line1_y{12};
+  int status_line2_y{30};
+};
+
+struct ToolbarTheme {
+  std::uint32_t frame_bg{};
+  std::uint32_t toolbar_bg{};
+  std::uint32_t toolbar_border{};
+  std::uint32_t button_bg{};
+  std::uint32_t button_hover_bg{};
+  std::uint32_t button_selected_bg{};
+  std::uint32_t button_border{};
+  std::uint32_t button_selected_border{};
+  std::uint32_t icon_fg{};
+  std::uint32_t panel_bg{};
+  std::uint32_t panel_top_bg{};
+  std::uint32_t panel_border{};
+  std::uint32_t status_text{};
+  std::uint32_t legend_text{};
+  std::uint32_t random_bg{};
+  std::uint32_t random_hover_bg{};
+  std::uint32_t random_top_bg{};
+  std::uint32_t random_hover_top_bg{};
+  std::uint32_t random_border{};
+  std::uint32_t random_text{};
+  std::uint32_t clear_bg{};
+  std::uint32_t clear_hover_bg{};
+  std::uint32_t clear_top_bg{};
+  std::uint32_t clear_hover_top_bg{};
+  std::uint32_t clear_border{};
+  std::uint32_t clear_text{};
+};
+
+constexpr std::array<MaterialColorStyle, kCellTypeCount> kMaterialColorStyles{{
+    {ColorModel::Solid, 0, 0, 0, 20},          // Empty
+    {ColorModel::Solid, 100, 100, 110, 20},    // Wall
+    {ColorModel::Solid, 210, 185, 85, 20},     // Sand
+    {ColorModel::WaterShimmer, 70, 125, 235, 20},  // Water
+    {ColorModel::Solid, 35, 35, 45, 20},       // Oil
+    {ColorModel::FireGlow, 220, 90, 25, 300},  // Fire
+    {ColorModel::SmokeSteam, 140, 140, 150, 20},   // Smoke
+    {ColorModel::LavaGlow, 185, 50, 12, 800},  // Lava
+}};
+
+constexpr std::array<PressureDebugStyle, kCellTypeCount> kPressureDebugStyles{{
+    {PressurePalette::Empty, 1},         // Empty
+    {PressurePalette::NeutralWall, 1},   // Wall
+    {PressurePalette::SandEarth, 160},   // Sand
+    {PressurePalette::LiquidCool, 200},  // Water
+    {PressurePalette::LiquidCool, 200},  // Oil
+    {PressurePalette::FireWarm, 180},    // Fire
+    {PressurePalette::SmokeWarm, 220},   // Smoke
+    {PressurePalette::LavaHot, 240},     // Lava
+}};
+
+constexpr MaterialColorStyle material_color_style(CellType t) noexcept {
+  return kMaterialColorStyles[cell_type_index(t)];
+}
+
+constexpr PressureDebugStyle pressure_debug_style(CellType t) noexcept {
+  return kPressureDebugStyles[cell_type_index(t)];
+}
+
+constexpr ToolbarLayout kToolbarLayout{};
+
+const ToolbarTheme kToolbarTheme{
+    .frame_bg = argb(255, 10, 10, 12),
+    .toolbar_bg = argb(255, 18, 18, 22),
+    .toolbar_border = argb(255, 70, 70, 85),
+    .button_bg = argb(255, 24, 24, 30),
+    .button_hover_bg = argb(255, 32, 32, 40),
+    .button_selected_bg = argb(255, 40, 40, 50),
+    .button_border = argb(255, 85, 85, 100),
+    .button_selected_border = argb(255, 255, 255, 255),
+    .icon_fg = argb(255, 220, 220, 230),
+    .panel_bg = argb(255, 22, 24, 30),
+    .panel_top_bg = argb(255, 32, 35, 45),
+    .panel_border = argb(255, 70, 78, 100),
+    .status_text = argb(255, 220, 226, 240),
+    .legend_text = argb(255, 172, 186, 205),
+    .random_bg = argb(255, 30, 56, 64),
+    .random_hover_bg = argb(255, 42, 76, 88),
+    .random_top_bg = argb(255, 48, 86, 96),
+    .random_hover_top_bg = argb(255, 64, 114, 128),
+    .random_border = argb(255, 105, 170, 185),
+    .random_text = argb(255, 226, 242, 244),
+    .clear_bg = argb(255, 64, 32, 32),
+    .clear_hover_bg = argb(255, 88, 44, 44),
+    .clear_top_bg = argb(255, 96, 48, 48),
+    .clear_hover_top_bg = argb(255, 125, 64, 64),
+    .clear_border = argb(255, 185, 105, 105),
+    .clear_text = argb(255, 244, 226, 226),
+};
+
+}  // namespace
+
 /**
  * @brief Packs channels into ARGB8888.
  * @param a Alpha channel.
@@ -51,46 +199,92 @@ static std::uint32_t color_for(const Cell& c) {
     return static_cast<std::uint8_t>(v);
   };
   const std::uint8_t h = heat(c.temp);
+  const MaterialColorStyle style = material_color_style(c.type);
 
-  switch (c.type) {
-    case CellType::Empty: return argb(255, 0, 0, 0);
-    case CellType::Wall: return argb(255, 100, 100, 110);
-    case CellType::Sand: return argb(255, 210, 185, 85);
-    case CellType::Water: {
+  switch (style.model) {
+    case ColorModel::Solid:
+      return argb(255, style.r, style.g, style.b);
+    case ColorModel::WaterShimmer: {
       const std::uint8_t shimmer = static_cast<std::uint8_t>(std::min<int>(h, 48));
       return argb(255,
-                  static_cast<std::uint8_t>(70 + shimmer / 3),
-                  static_cast<std::uint8_t>(125 + shimmer / 2),
-                  static_cast<std::uint8_t>(235 - shimmer / 4));
+                  static_cast<std::uint8_t>(style.r + shimmer / 3),
+                  static_cast<std::uint8_t>(style.g + shimmer / 2),
+                  static_cast<std::uint8_t>(style.b - shimmer / 4));
     }
-    case CellType::Oil: return argb(255, 35, 35, 45);
-    case CellType::Smoke: {
+    case ColorModel::SmokeSteam: {
       const std::uint8_t steam = static_cast<std::uint8_t>(std::min<int>(h, 55));
       return argb(255,
-                  static_cast<std::uint8_t>(140 + steam),
-                  static_cast<std::uint8_t>(140 + steam),
-                  static_cast<std::uint8_t>(150 + steam / 2));
+                  static_cast<std::uint8_t>(style.r + steam),
+                  static_cast<std::uint8_t>(style.g + steam),
+                  static_cast<std::uint8_t>(style.b + steam / 2));
     }
-    case CellType::Fire: return argb(255, static_cast<std::uint8_t>(220 + h / 2),
-                                     static_cast<std::uint8_t>(90 + h), 25);
-    case CellType::Lava: return argb(255, static_cast<std::uint8_t>(185 + h),
-                                     static_cast<std::uint8_t>(50 + h / 2), 12);
-    default: return argb(255, 255, 0, 255);
+    case ColorModel::FireGlow:
+      return argb(255, static_cast<std::uint8_t>(style.r + h / 2),
+                  static_cast<std::uint8_t>(style.g + h), style.b);
+    case ColorModel::LavaGlow:
+      return argb(255, static_cast<std::uint8_t>(style.r + h),
+                  static_cast<std::uint8_t>(style.g + h / 2), style.b);
+    default:
+      return argb(255, 255, 0, 255);
   }
 }
 
 static std::uint32_t color_for_pressure_debug(const Cell& c) {
-  if (c.type == CellType::Empty) return argb(255, 0, 0, 0);
-  if (c.type == CellType::Wall) return argb(255, 70, 70, 78);
+  auto norm255 = [](int p, int max_p) -> std::uint8_t {
+    const int v = std::clamp((p * 255) / std::max(1, max_p), 0, 255);
+    return static_cast<std::uint8_t>(v);
+  };
 
+  const PressureDebugStyle style = pressure_debug_style(c.type);
   const int p = std::clamp<int>(c.pressure, 0, 240);
-  const std::uint8_t lo = static_cast<std::uint8_t>(std::min(255, p * 2));
-  const std::uint8_t hi = static_cast<std::uint8_t>(std::min(255, std::max(0, (p - 96) * 2)));
 
-  const std::uint8_t r = static_cast<std::uint8_t>(30 + hi);
-  const std::uint8_t g = static_cast<std::uint8_t>(40 + lo / 2);
-  const std::uint8_t b = static_cast<std::uint8_t>(70 + (255 - lo) / 2);
-  return argb(255, r, g, b);
+  switch (style.palette) {
+    case PressurePalette::Empty:
+      return argb(255, 0, 0, 0);
+    case PressurePalette::NeutralWall:
+      return argb(255, 70, 70, 78);
+    case PressurePalette::SmokeWarm: {
+      // Gas pressure: warm yellow/white for trapped steam pockets.
+      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t r = static_cast<std::uint8_t>(90 + (t * 165) / 255);
+      const std::uint8_t g = static_cast<std::uint8_t>(70 + (t * 185) / 255);
+      const std::uint8_t b = static_cast<std::uint8_t>(35 + (t * 90) / 255);
+      return argb(255, r, g, b);
+    }
+    case PressurePalette::LiquidCool: {
+      // Liquid pressure: deep blue -> cyan -> pale white.
+      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t r = static_cast<std::uint8_t>(10 + (t * 120) / 255);
+      const std::uint8_t g = static_cast<std::uint8_t>(40 + (t * 190) / 255);
+      const std::uint8_t b = static_cast<std::uint8_t>(80 + (t * 175) / 255);
+      return argb(255, r, g, b);
+    }
+    case PressurePalette::LavaHot: {
+      // Lava pressure: dark maroon -> red -> orange -> yellow
+      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t t2 = static_cast<std::uint8_t>((int(t) * int(t)) / 255);
+      const std::uint8_t r = static_cast<std::uint8_t>(24 + (t * 210) / 255);
+      const std::uint8_t g = static_cast<std::uint8_t>(6 + (t2 * 180) / 255);
+      const std::uint8_t b = static_cast<std::uint8_t>(4 + (t2 * 36) / 255);
+      return argb(255, r, g, b);
+    }
+    case PressurePalette::FireWarm: {
+      const std::uint8_t t = norm255(p, style.max_pressure);
+      return argb(255,
+                  static_cast<std::uint8_t>(120 + (t * 135) / 255),
+                  static_cast<std::uint8_t>(30 + (t * 140) / 255),
+                  static_cast<std::uint8_t>(10 + (t * 40) / 255));
+    }
+    case PressurePalette::SandEarth: {
+      const std::uint8_t t = norm255(p, style.max_pressure);
+      return argb(255,
+                  static_cast<std::uint8_t>(80 + (t * 120) / 255),
+                  static_cast<std::uint8_t>(70 + (t * 110) / 255),
+                  static_cast<std::uint8_t>(45 + (t * 60) / 255));
+    }
+    default:
+      return argb(255, 255, 0, 255);
+  }
 }
 
 /**
@@ -215,7 +409,7 @@ std::span<const MaterialButton> RendererSDL::materials() {
 static std::uint32_t material_swatch_color(CellType t) {
   Cell tmp{};
   tmp.type = t;
-  tmp.temp = (t == CellType::Fire) ? 300 : (t == CellType::Lava ? 800 : 20);
+  tmp.temp = material_color_style(t).swatch_temp;
   return color_for(tmp);
 }
 
@@ -226,11 +420,9 @@ static std::uint32_t material_swatch_color(CellType t) {
  * @return Screen-space button rectangle.
  */
 static SDL_Rect toolbar_button_rect(int index, int toolbar_h) {
-  const int pad = 12;
-  const int size = toolbar_h - 24;
-  const int gap = 10;
-  const int x = pad + index * (size + gap);
-  const int y = 12;
+  const int size = toolbar_h - (2 * kToolbarLayout.button_margin_y);
+  const int x = kToolbarLayout.pad + index * (size + kToolbarLayout.gap);
+  const int y = kToolbarLayout.button_margin_y;
   return SDL_Rect{x, y, size, size};
 }
 
@@ -247,12 +439,11 @@ enum class ToolbarActionSlot : int {
  * @return Screen-space action button rectangle.
  */
 static SDL_Rect action_button_rect(int win_w, int toolbar_h, ToolbarActionSlot slot) {
-  const int pad = 12;
-  const int size = toolbar_h - 24;
-  const int width = 124;
-  const int gap = 10;
-  const int x = win_w - pad - width - (static_cast<int>(slot) * (width + gap));
-  const int y = 12;
+  const int size = toolbar_h - (2 * kToolbarLayout.button_margin_y);
+  const int width = kToolbarLayout.action_button_width;
+  const int x =
+      win_w - kToolbarLayout.pad - width - (static_cast<int>(slot) * (width + kToolbarLayout.gap));
+  const int y = kToolbarLayout.button_margin_y;
   return SDL_Rect{x, y, width, size};
 }
 
@@ -480,17 +671,10 @@ bool RendererSDL::hit_test_random_button(int mx, int my) const {
  * @return Uppercase material label.
  */
 static std::string mat_name(CellType t) {
-  switch (t) {
-    case CellType::Sand: return "SAND";
-    case CellType::Water: return "WATER";
-    case CellType::Oil: return "OIL";
-    case CellType::Fire: return "FIRE";
-    case CellType::Smoke: return "SMOKE";
-    case CellType::Lava: return "LAVA";
-    case CellType::Wall: return "WALL";
-    case CellType::Empty: return "ERASE";
-    default: return "UNKNOWN";
+  for (const auto& m : kMaterialButtons) {
+    if (m.type == t) return m.name;
   }
+  return "UNKNOWN";
 }
 
 void RendererSDL::draw(const World& world,
@@ -509,14 +693,14 @@ void RendererSDL::draw(const World& world,
   }
   SDL_UpdateTexture(texture, nullptr, pixels.data(), grid_w * int(sizeof(std::uint32_t)));
 
-  set_draw_color(renderer, argb(255, 10, 10, 12));
+  set_draw_color(renderer, kToolbarTheme.frame_bg);
   SDL_RenderClear(renderer);
 
-  set_draw_color(renderer, argb(255, 18, 18, 22));
+  set_draw_color(renderer, kToolbarTheme.toolbar_bg);
   SDL_Rect bar{0, 0, win_w, toolbar_h};
   SDL_RenderFillRect(renderer, &bar);
 
-  set_draw_color(renderer, argb(255, 70, 70, 85));
+  set_draw_color(renderer, kToolbarTheme.toolbar_border);
   SDL_RenderDrawLine(renderer, 0, toolbar_h - 1, win_w, toolbar_h - 1);
 
   std::optional<CellType> hovered = hit_test_toolbar(mouse_x, mouse_y);
@@ -532,45 +716,45 @@ void RendererSDL::draw(const World& world,
     const bool is_sel = (mats[i].type == selected);
     const bool is_hover = hovered.has_value() && hovered.value() == mats[i].type;
 
-    const std::uint32_t bgc = is_sel ? argb(255, 40, 40, 50)
-                                     : is_hover ? argb(255, 32, 32, 40)
-                                                : argb(255, 24, 24, 30);
+    const std::uint32_t bgc = is_sel ? kToolbarTheme.button_selected_bg
+                                     : is_hover ? kToolbarTheme.button_hover_bg
+                                                : kToolbarTheme.button_bg;
     set_draw_color(renderer, bgc);
     SDL_RenderFillRect(renderer, &b);
 
     const std::uint32_t sw = material_swatch_color(mats[i].type);
-    SDL_Rect strip{b.x, b.y + b.h - 6, b.w, 6};
+    SDL_Rect strip{b.x, b.y + b.h - kToolbarLayout.material_strip_h, b.w, kToolbarLayout.material_strip_h};
     set_draw_color(renderer, sw);
     SDL_RenderFillRect(renderer, &strip);
 
-    set_draw_color(renderer, is_sel ? argb(255, 255, 255, 255) : argb(255, 85, 85, 100));
+    set_draw_color(renderer, is_sel ? kToolbarTheme.button_selected_border : kToolbarTheme.button_border);
     SDL_RenderDrawRect(renderer, &b);
 
-    draw_icon(renderer, b, mats[i].type, argb(255, 220, 220, 230));
+    draw_icon(renderer, b, mats[i].type, kToolbarTheme.icon_fg);
   }
 
   // Draw right-side action buttons.
   const SDL_Rect random_btn = random_button_rect(win_w, toolbar_h);
-  const std::uint32_t random_bg = random_hovered ? argb(255, 42, 76, 88) : argb(255, 30, 56, 64);
+  const std::uint32_t random_bg = random_hovered ? kToolbarTheme.random_hover_bg : kToolbarTheme.random_bg;
   set_draw_color(renderer, random_bg);
   SDL_RenderFillRect(renderer, &random_btn);
-  SDL_Rect random_top{random_btn.x + 1, random_btn.y + 1, random_btn.w - 2, 8};
-  set_draw_color(renderer, random_hovered ? argb(255, 64, 114, 128) : argb(255, 48, 86, 96));
+  SDL_Rect random_top{random_btn.x + 1, random_btn.y + 1, random_btn.w - 2, kToolbarLayout.panel_top_band_h};
+  set_draw_color(renderer, random_hovered ? kToolbarTheme.random_hover_top_bg : kToolbarTheme.random_top_bg);
   SDL_RenderFillRect(renderer, &random_top);
-  set_draw_color(renderer, argb(255, 105, 170, 185));
+  set_draw_color(renderer, kToolbarTheme.random_border);
   SDL_RenderDrawRect(renderer, &random_btn);
-  draw_text(renderer, random_btn.x + 10, random_btn.y + 12, "RANDOM", 2, argb(255, 226, 242, 244));
+  draw_text(renderer, random_btn.x + 10, random_btn.y + 12, "RANDOM", 2, kToolbarTheme.random_text);
 
   const SDL_Rect clear_btn = clear_button_rect(win_w, toolbar_h);
-  const std::uint32_t clear_bg = clear_hovered ? argb(255, 88, 44, 44) : argb(255, 64, 32, 32);
+  const std::uint32_t clear_bg = clear_hovered ? kToolbarTheme.clear_hover_bg : kToolbarTheme.clear_bg;
   set_draw_color(renderer, clear_bg);
   SDL_RenderFillRect(renderer, &clear_btn);
-  SDL_Rect clear_top{clear_btn.x + 1, clear_btn.y + 1, clear_btn.w - 2, 8};
-  set_draw_color(renderer, clear_hovered ? argb(255, 125, 64, 64) : argb(255, 96, 48, 48));
+  SDL_Rect clear_top{clear_btn.x + 1, clear_btn.y + 1, clear_btn.w - 2, kToolbarLayout.panel_top_band_h};
+  set_draw_color(renderer, clear_hovered ? kToolbarTheme.clear_hover_top_bg : kToolbarTheme.clear_top_bg);
   SDL_RenderFillRect(renderer, &clear_top);
-  set_draw_color(renderer, argb(255, 185, 105, 105));
+  set_draw_color(renderer, kToolbarTheme.clear_border);
   SDL_RenderDrawRect(renderer, &clear_btn);
-  draw_text(renderer, clear_btn.x + 18, clear_btn.y + 12, "RESET", 2, argb(255, 244, 226, 226));
+  draw_text(renderer, clear_btn.x + 18, clear_btn.y + 12, "RESET", 2, kToolbarTheme.clear_text);
 
   std::string hover_text;
   if (random_hovered) {
@@ -590,23 +774,42 @@ void RendererSDL::draw(const World& world,
                  (show_pressure_debug ? "  [PRESSURE]" : "");
   }
 
-  const int panel_x = tools_right + 16;
+  const int panel_x = tools_right + kToolbarLayout.panel_gap;
   const int actions_left = std::min(random_btn.x, clear_btn.x);
-  const int panel_w = std::max(120, actions_left - 16 - panel_x);
-  SDL_Rect status_panel{panel_x, 12, panel_w, toolbar_h - 24};
-  set_draw_color(renderer, argb(255, 22, 24, 30));
+  const int panel_w = std::max(kToolbarLayout.panel_min_width, actions_left - kToolbarLayout.panel_gap - panel_x);
+  SDL_Rect status_panel{panel_x, kToolbarLayout.button_margin_y, panel_w, toolbar_h - (2 * kToolbarLayout.button_margin_y)};
+  set_draw_color(renderer, kToolbarTheme.panel_bg);
   SDL_RenderFillRect(renderer, &status_panel);
-  SDL_Rect status_top{status_panel.x + 1, status_panel.y + 1, status_panel.w - 2, 8};
-  set_draw_color(renderer, argb(255, 32, 35, 45));
+  SDL_Rect status_top{status_panel.x + 1, status_panel.y + 1, status_panel.w - 2, kToolbarLayout.panel_top_band_h};
+  set_draw_color(renderer, kToolbarTheme.panel_top_bg);
   SDL_RenderFillRect(renderer, &status_top);
-  set_draw_color(renderer, argb(255, 70, 78, 100));
+  set_draw_color(renderer, kToolbarTheme.panel_border);
   SDL_RenderDrawRect(renderer, &status_panel);
 
-  const int max_chars = std::max(0, (status_panel.w - 16) / 12);
+  const int max_chars = std::max(0, (status_panel.w - (2 * kToolbarLayout.panel_inset)) / 12);
   if (static_cast<int>(hover_text.size()) > max_chars) {
     hover_text.resize(static_cast<std::size_t>(max_chars));
   }
-  draw_text(renderer, status_panel.x + 8, status_panel.y + 12, hover_text, 2, argb(255, 220, 226, 240));
+  draw_text(renderer,
+            status_panel.x + kToolbarLayout.panel_inset,
+            status_panel.y + kToolbarLayout.status_line1_y,
+            hover_text,
+            2,
+            kToolbarTheme.status_text);
+
+  if (show_pressure_debug) {
+    std::string legend = "PRESSURE: Y=SMOKE  C=LIQ  O=LAVA";
+    const int legend_max_chars = std::max(0, (status_panel.w - (2 * kToolbarLayout.panel_inset)) / 6);
+    if (static_cast<int>(legend.size()) > legend_max_chars) {
+      legend.resize(static_cast<std::size_t>(legend_max_chars));
+    }
+    draw_text(renderer,
+              status_panel.x + kToolbarLayout.panel_inset,
+              status_panel.y + kToolbarLayout.status_line2_y,
+              legend,
+              1,
+              kToolbarTheme.legend_text);
+  }
 
   SDL_Rect dst{0, toolbar_h, grid_w * scale, grid_h * scale};
   SDL_RenderCopy(renderer, texture, nullptr, &dst);

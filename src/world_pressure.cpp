@@ -1,62 +1,28 @@
 /**
  * @file world_pressure.cpp
- * @brief Pressure heuristic pass for gas-like materials.
+ * @brief Pressure pass orchestration and shared damping.
  */
 
-#include "world.hpp"
+#include "world_pressure_internal.hpp"
 
 #include <algorithm>
 
-namespace {
+namespace pressure_detail {
 
-constexpr int kAmbientTemp = 20;
 constexpr int kPressureMin = 0;
 constexpr int kPressureMax = 240;
-
-constexpr int kBlockedAbovePenalty = 55;
-constexpr int kBlockedSidePenalty = 22;
-constexpr int kFluidSidePenalty = 14;
-constexpr int kGasNeighborPenalty = 4;
-constexpr int kOpenRelief = 12;
-constexpr int kNoEscapeBonus = 30;
-constexpr int kHeatBonusStep = 40;
-constexpr int kHeatBonusAmount = 6;
-constexpr int kLiquidDepthPressurePerCell = 18;
-constexpr int kLiquidBlockedBelowBonus = 28;
-constexpr int kLiquidWallSideBonus = 10;
-constexpr int kLiquidOpenSideRelief = 8;
-constexpr int kLiquidHeatBonusStep = 60;
-constexpr int kLiquidHeatBonusAmount = 4;
-constexpr int kMaxLiquidDepthSample = 8;
 constexpr int kPressureDampingNumerator = 1;
 constexpr int kPressureDampingDenominator = 3;
 
-bool is_gas_like(CellType t) {
-  return t == CellType::Smoke;
+std::int16_t damp_pressure(std::int16_t current, int target) noexcept {
+  const int blended =
+      (static_cast<int>(current) * kPressureDampingNumerator +
+       target * (kPressureDampingDenominator - kPressureDampingNumerator)) /
+      kPressureDampingDenominator;
+  return static_cast<std::int16_t>(std::clamp(blended, kPressureMin, kPressureMax));
 }
 
-bool is_fluid_like(CellType t) {
-  return t == CellType::Water || t == CellType::Oil;
-}
-
-bool is_open_for_smoke(CellType t) {
-  return t == CellType::Empty || t == CellType::Smoke;
-}
-
-bool supports_liquid(CellType t) {
-  return t != CellType::Empty && t != CellType::Smoke;
-}
-
-int liquid_overburden_depth(const World& world, int x, int y, CellType fluid) {
-  int depth = 0;
-  for (int ny = y - 1; ny >= 1 && depth < kMaxLiquidDepthSample; --ny) {
-    if (world.at(x, ny).type != fluid) break;
-    ++depth;
-  }
-  return depth;
-}
-
-}  // namespace
+}  // namespace pressure_detail
 
 void World::pass_pressure_update() {
   for (int y = 1; y < h - 1; ++y) {
@@ -64,78 +30,14 @@ void World::pass_pressure_update() {
       Cell& c = at(x, y);
 
       if (c.type == CellType::Smoke) {
-        int p = 0;
-
-        const CellType up = at(x, y - 1).type;
-        if (!is_open_for_smoke(up)) p += kBlockedAbovePenalty;
-        else p -= kOpenRelief;
-
-        const CellType down = at(x, y + 1).type;
-        if (!is_open_for_smoke(down)) p += kBlockedSidePenalty;
-        else p -= kOpenRelief / 2;
-
-        const CellType left = at(x - 1, y).type;
-        const CellType right = at(x + 1, y).type;
-
-        auto accumulate_side = [&](CellType t) {
-          if (t == CellType::Empty) {
-            p -= kOpenRelief;
-          } else if (is_gas_like(t)) {
-            p += kGasNeighborPenalty;
-          } else if (is_fluid_like(t)) {
-            p += kFluidSidePenalty;
-          } else {
-            p += kBlockedSidePenalty;
-          }
-        };
-
-        accumulate_side(left);
-        accumulate_side(right);
-
-        const bool no_escape =
-            !is_open_for_smoke(up) &&
-            !is_open_for_smoke(at(x - 1, y - 1).type) &&
-            !is_open_for_smoke(at(x + 1, y - 1).type);
-        if (no_escape) p += kNoEscapeBonus;
-
-        if (c.temp > kAmbientTemp) {
-          p += ((static_cast<int>(c.temp) - kAmbientTemp) / kHeatBonusStep) * kHeatBonusAmount;
-        }
-
-        const int target = std::clamp(p, kPressureMin, kPressureMax);
-        const int blended =
-            (static_cast<int>(c.pressure) * kPressureDampingNumerator + target * (kPressureDampingDenominator - kPressureDampingNumerator)) /
-            kPressureDampingDenominator;
-        c.pressure = static_cast<std::int16_t>(std::clamp(blended, kPressureMin, kPressureMax));
+        c.pressure = pressure_detail::damp_pressure(
+            c.pressure, pressure_detail::compute_smoke_pressure_target(*this, x, y, c));
         continue;
       }
 
-      if (c.type == CellType::Water || c.type == CellType::Oil) {
-        int p = 0;
-        const CellType fluid = c.type;
-
-        p += liquid_overburden_depth(*this, x, y, fluid) * kLiquidDepthPressurePerCell;
-
-        if (supports_liquid(at(x, y + 1).type)) p += kLiquidBlockedBelowBonus;
-
-        auto side_pressure = [&](CellType t) {
-          if (t == CellType::Empty || t == CellType::Smoke) return -kLiquidOpenSideRelief;
-          if (t == CellType::Wall) return kLiquidWallSideBonus;
-          return 0;
-        };
-
-        p += side_pressure(at(x - 1, y).type);
-        p += side_pressure(at(x + 1, y).type);
-
-        if (c.temp > kAmbientTemp) {
-          p += ((static_cast<int>(c.temp) - kAmbientTemp) / kLiquidHeatBonusStep) * kLiquidHeatBonusAmount;
-        }
-
-        const int target = std::clamp(p, kPressureMin, kPressureMax);
-        const int blended =
-            (static_cast<int>(c.pressure) * kPressureDampingNumerator + target * (kPressureDampingDenominator - kPressureDampingNumerator)) /
-            kPressureDampingDenominator;
-        c.pressure = static_cast<std::int16_t>(std::clamp(blended, kPressureMin, kPressureMax));
+      if (pressure_detail::is_dense_pressure_material(c.type)) {
+        c.pressure = pressure_detail::damp_pressure(
+            c.pressure, pressure_detail::compute_dense_pressure_target(*this, x, y, c));
         continue;
       }
 
