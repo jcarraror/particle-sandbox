@@ -5,6 +5,7 @@
 
 #include "world.hpp"
 
+#include <algorithm>
 #include <array>
 
 /**
@@ -33,6 +34,8 @@ constexpr int kOilSpread = 4;
 
 constexpr int kFireSelfHeatPerTick = 5;
 constexpr int kFireNeighborHeatPerTick = 3;
+constexpr int kFireWaterQuenchPerNeighbor = 22;
+constexpr int kFireMinSustainTemp = 110;
 constexpr int kFireMaxTemp = 1200;
 constexpr std::uint32_t kFireToSmokeOddsDivisor = 25;
 constexpr std::uint32_t kFireExtinguishOddsDivisor = 120;
@@ -41,6 +44,14 @@ constexpr std::int16_t kSmokeFromFireTemp = 80;
 constexpr int kLavaSelfHeatPerTick = 2;
 constexpr int kLavaNeighborHeatPerTick = 6;
 constexpr int kLavaMaxTemp = 2000;
+constexpr int kWaterHeatAbsorbFromFire = 16;
+constexpr int kWaterHeatAbsorbFromLava = 10;
+constexpr int kWaterSteamTempThreshold = 140;
+constexpr std::uint32_t kWaterSteamOddsDivisor = 5;
+constexpr std::int16_t kSteamTemp = 130;
+constexpr std::uint32_t kSmokeBubbleSwapOddsDivisor = 2;
+constexpr std::uint32_t kSteamBubbleSwapOddsDivisor = 1;
+constexpr int kSteamSmokeTempThreshold = 120;
 constexpr std::uint32_t kLavaSmokeSpawnOddsDivisor = 80;
 constexpr std::int16_t kSmokeFromLavaTemp = 120;
 }  // namespace simcfg
@@ -75,6 +86,89 @@ void ignite_oil_neighbors(World& world, int x, int y) {
     n.temp = simcfg::kIgnitedFireTemp;
     n.updated = world.stamp;
   });
+}
+
+void absorb_heat_from_hot_neighbors(World& world, int x, int y) {
+  Cell& water = world.at(x, y);
+  int absorbed = 0;
+
+  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
+    if (n.type == CellType::Fire) {
+      n.temp = static_cast<std::int16_t>(clampi(
+          n.temp - simcfg::kWaterHeatAbsorbFromFire, simcfg::kMinCellTemp, simcfg::kFireMaxTemp));
+      absorbed += simcfg::kWaterHeatAbsorbFromFire;
+      return;
+    }
+    if (n.type == CellType::Lava) {
+      n.temp = static_cast<std::int16_t>(clampi(
+          n.temp - simcfg::kWaterHeatAbsorbFromLava, simcfg::kMinCellTemp, simcfg::kLavaMaxTemp));
+      absorbed += simcfg::kWaterHeatAbsorbFromLava;
+    }
+  });
+
+  if (absorbed <= 0) return;
+  water.temp = static_cast<std::int16_t>(clampi(
+      water.temp + absorbed, simcfg::kAmbientTemp, simcfg::kMaxNeighborHeatTemp));
+}
+
+bool try_evaporate_water(World& world, int x, int y) {
+  Cell& c = world.at(x, y);
+  if (c.type != CellType::Water) return false;
+  if (c.temp < simcfg::kWaterSteamTempThreshold) return false;
+
+  bool near_hot = false;
+  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
+    if (n.type == CellType::Fire || n.type == CellType::Lava) near_hot = true;
+  });
+  if (!near_hot) return false;
+
+  const int overheat = std::max(0, static_cast<int>(c.temp) - simcfg::kWaterSteamTempThreshold);
+  const std::uint32_t bonus = static_cast<std::uint32_t>(overheat / 40);
+  const std::uint32_t divisor =
+      std::max<std::uint32_t>(1u, simcfg::kWaterSteamOddsDivisor - std::min<std::uint32_t>(3u, bonus));
+  if ((world.rng.next_u32() % divisor) != 0u) return false;
+
+  c.type = CellType::Smoke;
+  c.temp = simcfg::kSteamTemp;
+  c.updated = world.stamp;
+  return true;
+}
+
+void quench_fire_from_water(World& world, int x, int y) {
+  Cell& fire = world.at(x, y);
+  int adjacent_water = 0;
+
+  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
+    if (n.type != CellType::Water) return;
+    ++adjacent_water;
+    n.temp = static_cast<std::int16_t>(clampi(
+        n.temp + simcfg::kWaterHeatAbsorbFromFire, simcfg::kAmbientTemp, simcfg::kMaxNeighborHeatTemp));
+  });
+
+  if (adjacent_water == 0) return;
+
+  fire.temp = static_cast<std::int16_t>(clampi(
+      fire.temp - adjacent_water * simcfg::kFireWaterQuenchPerNeighbor,
+      simcfg::kMinCellTemp,
+      simcfg::kFireMaxTemp));
+}
+
+bool try_swap_smoke_with_fluid(World& world, int x, int y, int nx, int ny) {
+  if (!world.in_bounds(nx, ny)) return false;
+
+  Cell& src = world.at(x, y);
+  Cell& dst = world.at(nx, ny);
+  if (src.type != CellType::Smoke) return false;
+  if (dst.type != CellType::Water && dst.type != CellType::Oil) return false;
+
+  const bool steam_like = src.temp >= simcfg::kSteamSmokeTempThreshold;
+  const std::uint32_t divisor =
+      steam_like ? simcfg::kSteamBubbleSwapOddsDivisor : simcfg::kSmokeBubbleSwapOddsDivisor;
+  if (divisor > 1u && (world.rng.next_u32() % divisor) != 0u) return false;
+
+  std::swap(src, dst);
+  world.at(nx, ny).updated = world.stamp;
+  return true;
 }
 
 }  // namespace
@@ -127,7 +221,7 @@ void World::step_sand(int x, int y, bool ltr) {
 }
 
 /**
- * @brief Water rule: fall down, then diagonals, then short lateral spread.
+ * @brief Water rule: absorb heat, evaporate if hot, then flow like a liquid.
  *
  * Water can travel horizontally up to 3 cells when blocked vertically.
  *
@@ -136,6 +230,9 @@ void World::step_sand(int x, int y, bool ltr) {
  * @param ltr Preferred diagonal order determined by frame sweep direction.
  */
 void World::step_water(int x, int y, bool ltr) {
+  absorb_heat_from_hot_neighbors(*this, x, y);
+  if (try_evaporate_water(*this, x, y)) return;
+
   if (try_move(x, y, x, y + 1)) return;
 
   const int dx1 = (ltr ? -1 : 1);
@@ -178,7 +275,7 @@ void World::step_oil(int x, int y, bool ltr) {
 }
 
 /**
- * @brief Smoke rule: rise upward, then diagonals upward, then drift sideways.
+ * @brief Smoke rule: rise, bubble through water/oil, then drift sideways.
  *
  * @param x Cell X.
  * @param y Cell Y.
@@ -186,12 +283,15 @@ void World::step_oil(int x, int y, bool ltr) {
  */
 void World::step_smoke(int x, int y, bool ltr) {
   if (try_move(x, y, x, y - 1)) return;
+  if (try_swap_smoke_with_fluid(*this, x, y, x, y - 1)) return;
 
   const int dx1 = (ltr ? -1 : 1);
   const int dx2 = -dx1;
 
   if (try_move(x, y, x + dx1, y - 1)) return;
+  if (try_swap_smoke_with_fluid(*this, x, y, x + dx1, y - 1)) return;
   if (try_move(x, y, x + dx2, y - 1)) return;
+  if (try_swap_smoke_with_fluid(*this, x, y, x + dx2, y - 1)) return;
 
   if (rng.coin()) (void)try_move(x, y, x + dx1, y);
   else (void)try_move(x, y, x + dx2, y);
@@ -215,12 +315,13 @@ void World::heat_neighbors(int x, int y, int amount) {
 }
 
 /**
- * @brief Fire rule: self-heats, warms neighbors, ignites oil, then decays.
+ * @brief Fire rule: self-heats, warms neighbors, can be quenched by water, then decays.
  *
  * Behavior summary:
  * - Increases own temperature (capped).
  * - Adds mild heat to adjacent cells.
  * - Has a random chance to ignite neighboring oil into fire.
+ * - Loses heat quickly when adjacent to water and can extinguish when cooled.
  * - Randomly decays into smoke or disappears entirely.
  *
  * @param x Cell X.
@@ -232,6 +333,13 @@ void World::step_fire(int x, int y) {
       clampi(c.temp + simcfg::kFireSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kFireMaxTemp));
   heat_neighbors(x, y, simcfg::kFireNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
+  quench_fire_from_water(*this, x, y);
+
+  if (c.temp < simcfg::kFireMinSustainTemp) {
+    c.type = CellType::Smoke;
+    c.temp = simcfg::kSmokeFromFireTemp;
+    return;
+  }
 
   const std::uint32_t r = rng.next_u32();
   if ((r % simcfg::kFireToSmokeOddsDivisor) == 0u) {

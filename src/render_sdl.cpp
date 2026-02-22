@@ -55,9 +55,21 @@ static std::uint32_t color_for(const Cell& c) {
     case CellType::Empty: return argb(255, 0, 0, 0);
     case CellType::Wall: return argb(255, 100, 100, 110);
     case CellType::Sand: return argb(255, 210, 185, 85);
-    case CellType::Water: return argb(255, 70, 125, 235);
+    case CellType::Water: {
+      const std::uint8_t shimmer = static_cast<std::uint8_t>(std::min<int>(h, 48));
+      return argb(255,
+                  static_cast<std::uint8_t>(70 + shimmer / 3),
+                  static_cast<std::uint8_t>(125 + shimmer / 2),
+                  static_cast<std::uint8_t>(235 - shimmer / 4));
+    }
     case CellType::Oil: return argb(255, 35, 35, 45);
-    case CellType::Smoke: return argb(255, 140, 140, 150);
+    case CellType::Smoke: {
+      const std::uint8_t steam = static_cast<std::uint8_t>(std::min<int>(h, 55));
+      return argb(255,
+                  static_cast<std::uint8_t>(140 + steam),
+                  static_cast<std::uint8_t>(140 + steam),
+                  static_cast<std::uint8_t>(150 + steam / 2));
+    }
     case CellType::Fire: return argb(255, static_cast<std::uint8_t>(220 + h / 2),
                                      static_cast<std::uint8_t>(90 + h), 25);
     case CellType::Lava: return argb(255, static_cast<std::uint8_t>(185 + h),
