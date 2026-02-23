@@ -154,6 +154,7 @@ void World::generate_random_scene() {
     c.type = t;
     c.temp = sim::material_props(t).spawn_temp;
     c.pressure = 0;
+    c.load = 0;
     c.updated = stamp;
   };
 
@@ -257,6 +258,7 @@ void World::paint_disc(int cx, int cy, int radius, CellType t) {
 
       c.temp = sim::material_props(t).spawn_temp;
       c.pressure = 0;
+      c.load = 0;
     }
   }
 }

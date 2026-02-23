@@ -30,6 +30,7 @@ void World::pass_pressure_update() {
       Cell& c = at(x, y);
 
       if (c.type == CellType::Smoke) {
+        c.load = 0;
         c.pressure = pressure_detail::damp_pressure(
             c.pressure, pressure_detail::compute_smoke_pressure_target(*this, x, y, c));
         continue;
@@ -42,6 +43,7 @@ void World::pass_pressure_update() {
       }
 
       c.pressure = 0;
+      c.load = 0;
     }
   }
 

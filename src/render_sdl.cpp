@@ -53,7 +53,8 @@ enum class PressurePalette : std::uint8_t {
 
 struct PressureDebugStyle {
   PressurePalette palette{PressurePalette::Fallback};
-  int max_pressure{240};
+  int max_value{240};
+  bool use_load_field{false};
 };
 
 struct ToolbarLayout {
@@ -111,14 +112,14 @@ constexpr std::array<MaterialColorStyle, kCellTypeCount> kMaterialColorStyles{{
 }};
 
 constexpr std::array<PressureDebugStyle, kCellTypeCount> kPressureDebugStyles{{
-    {PressurePalette::Empty, 1},         // Empty
-    {PressurePalette::NeutralWall, 1},   // Wall
-    {PressurePalette::SandEarth, 160},   // Sand
-    {PressurePalette::LiquidCool, 200},  // Water
-    {PressurePalette::LiquidCool, 200},  // Oil
-    {PressurePalette::FireWarm, 180},    // Fire
-    {PressurePalette::SmokeWarm, 220},   // Smoke
-    {PressurePalette::LavaHot, 240},     // Lava
+    {PressurePalette::Empty, 1, false},         // Empty
+    {PressurePalette::NeutralWall, 1, true},    // Wall
+    {PressurePalette::SandEarth, 320, true},    // Sand
+    {PressurePalette::LiquidCool, 320, true},   // Water
+    {PressurePalette::LiquidCool, 320, true},   // Oil
+    {PressurePalette::FireWarm, 180, false},    // Fire
+    {PressurePalette::SmokeWarm, 220, false},   // Smoke
+    {PressurePalette::LavaHot, 420, true},      // Lava
 }};
 
 constexpr MaterialColorStyle material_color_style(CellType t) noexcept {
@@ -130,6 +131,8 @@ constexpr PressureDebugStyle pressure_debug_style(CellType t) noexcept {
 }
 
 constexpr ToolbarLayout kToolbarLayout{};
+constexpr int kLoadDebugRangeMin = 0;
+constexpr int kLoadDebugRangeMax = 480;
 
 const ToolbarTheme kToolbarTheme{
     .frame_bg = argb(255, 10, 10, 12),
@@ -249,9 +252,9 @@ static std::uint32_t color_for_pressure_debug(const Cell& c) {
   auto lava_pressure_color = [](std::uint8_t t) -> std::uint32_t {
     const std::uint8_t t2 = static_cast<std::uint8_t>((int(t) * int(t)) / 255);
     return argb(255,
-                static_cast<std::uint8_t>(24 + (t * 210) / 255),
-                static_cast<std::uint8_t>(6 + (t2 * 180) / 255),
-                static_cast<std::uint8_t>(4 + (t2 * 36) / 255));
+                static_cast<std::uint8_t>(70 + (t * 175) / 255),
+                static_cast<std::uint8_t>(18 + (t2 * 185) / 255),
+                static_cast<std::uint8_t>(8 + (t2 * 44) / 255));
   };
   auto fire_pressure_color = [](std::uint8_t t) -> std::uint32_t {
     return argb(255,
@@ -267,7 +270,8 @@ static std::uint32_t color_for_pressure_debug(const Cell& c) {
   };
 
   const PressureDebugStyle style = pressure_debug_style(c.type);
-  const int p = std::clamp<int>(c.pressure, 0, 240);
+  const int debug_scalar = style.use_load_field ? static_cast<int>(c.load) : static_cast<int>(c.pressure);
+  const int p = std::clamp(debug_scalar, 0, style.max_value);
 
   switch (style.palette) {
     case PressurePalette::Empty:
@@ -276,27 +280,73 @@ static std::uint32_t color_for_pressure_debug(const Cell& c) {
       return argb(255, 70, 70, 78);
     case PressurePalette::SmokeWarm: {
       // Gas pressure: warm yellow/white for trapped steam pockets.
-      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t t = norm255(p, style.max_value);
       return smoke_pressure_color(t);
     }
     case PressurePalette::LiquidCool: {
       // Liquid pressure: deep blue -> cyan -> pale white.
-      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t t = norm255(p, style.max_value);
       return liquid_pressure_color(t);
     }
     case PressurePalette::LavaHot: {
       // Lava pressure: dark maroon -> red -> orange -> yellow
-      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t t = norm255(p, style.max_value);
       return lava_pressure_color(t);
     }
     case PressurePalette::FireWarm: {
-      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t t = norm255(p, style.max_value);
       return fire_pressure_color(t);
     }
     case PressurePalette::SandEarth: {
-      const std::uint8_t t = norm255(p, style.max_pressure);
+      const std::uint8_t t = norm255(p, style.max_value);
       return sand_pressure_color(t);
     }
+    default:
+      return argb(255, 255, 0, 255);
+  }
+}
+
+static std::uint32_t color_for_load_debug(const Cell& c, int range_min, int range_max) {
+  if (c.type == CellType::Empty) return argb(255, 0, 0, 0);
+  if (c.type == CellType::Smoke || c.type == CellType::Fire) return argb(255, 20, 20, 24);
+
+  auto norm255 = [](int v, int lo, int hi) -> std::uint8_t {
+    const int denom = std::max(1, hi - lo);
+    const int clamped = std::clamp(v, lo, hi);
+    const int scaled = ((clamped - lo) * 255) / denom;
+    return static_cast<std::uint8_t>(scaled);
+  };
+  auto contrast = [](std::uint8_t t) -> std::uint8_t {
+    // Gamma remap to separate midrange values visually.
+    return static_cast<std::uint8_t>((int(t) * int(t)) / 255);
+  };
+
+  const int raw = std::max(0, static_cast<int>(c.load));
+  const std::uint8_t t = norm255(raw, range_min, range_max);
+  const std::uint8_t tc = contrast(t);
+
+  switch (c.type) {
+    case CellType::Lava:
+      return argb(255,
+                  static_cast<std::uint8_t>(110 + (t * 145) / 255),
+                  static_cast<std::uint8_t>(38 + (tc * 175) / 255),
+                  static_cast<std::uint8_t>(12 + (tc * 56) / 255));
+    case CellType::Wall:
+      return argb(255,
+                  static_cast<std::uint8_t>(40 + (tc * 120) / 255),
+                  static_cast<std::uint8_t>(40 + (tc * 120) / 255),
+                  static_cast<std::uint8_t>(46 + (tc * 110) / 255));
+    case CellType::Sand:
+      return argb(255,
+                  static_cast<std::uint8_t>(55 + (t * 150) / 255),
+                  static_cast<std::uint8_t>(45 + (tc * 135) / 255),
+                  static_cast<std::uint8_t>(24 + (tc * 70) / 255));
+    case CellType::Water:
+    case CellType::Oil:
+      return argb(255,
+                  static_cast<std::uint8_t>(8 + (tc * 95) / 255),
+                  static_cast<std::uint8_t>(30 + (t * 165) / 255),
+                  static_cast<std::uint8_t>(60 + (t * 180) / 255));
     default:
       return argb(255, 255, 0, 255);
   }
@@ -698,12 +748,19 @@ void RendererSDL::draw(const World& world,
                        int mouse_x,
                        int mouse_y,
                        bool paused,
-                       bool show_pressure_debug) {
+                       DebugView debug_view) {
+  const bool show_pressure_debug = (debug_view == DebugView::Pressure);
+  const bool show_load_debug = (debug_view == DebugView::Load);
+  const int load_range_min = kLoadDebugRangeMin;
+  const int load_range_max = kLoadDebugRangeMax;
+
   for (int y = 0; y < grid_h; ++y) {
     for (int x = 0; x < grid_w; ++x) {
       const Cell& c = world.at(x, y);
       pixels[static_cast<std::size_t>(y * grid_w + x)] =
-          show_pressure_debug ? color_for_pressure_debug(c) : color_for(c);
+          show_pressure_debug ? color_for_pressure_debug(c)
+                              : show_load_debug ? color_for_load_debug(c, load_range_min, load_range_max)
+                                                : color_for(c);
     }
   }
   SDL_UpdateTexture(texture, nullptr, pixels.data(), grid_w * int(sizeof(std::uint32_t)));
@@ -786,7 +843,7 @@ void RendererSDL::draw(const World& world,
   } else {
     hover_text = "ACTIVE: " + mat_name(selected) + "  BRUSH " + std::to_string(brush_radius) +
                  (paused ? "  [PAUSED]" : "") +
-                 (show_pressure_debug ? "  [PRESSURE]" : "");
+                 (show_pressure_debug ? "  [PRESSURE]" : show_load_debug ? "  [LOAD]" : "");
   }
 
   const int panel_x = tools_right + kToolbarLayout.panel_gap;
@@ -812,14 +869,18 @@ void RendererSDL::draw(const World& world,
             2,
             kToolbarTheme.status_text);
 
-  if (show_pressure_debug) {
-    std::string legend = "PRESSURE: Y=SMOKE  C=LIQ  O=LAVA";
+  if (show_pressure_debug || show_load_debug) {
+    std::string legend = show_load_debug
+                             ? "LOAD: DENSE STRESS FIXED [" + std::to_string(load_range_min) + ".." +
+                                   std::to_string(load_range_max) + "]"
+                             : "PRESSURE: Y=SMOKE  C=LIQ  O=LAVA";
     int gx = 0;
     int gy = 0;
     if (mouse_to_grid(mouse_x, mouse_y, gx, gy)) {
       const Cell& hc = world.at(gx, gy);
       legend = "CELL " + mat_name(hc.type) + " T" + std::to_string(static_cast<int>(hc.temp)) +
-               " P" + std::to_string(static_cast<int>(hc.pressure));
+               " P" + std::to_string(static_cast<int>(hc.pressure)) +
+               " L" + std::to_string(static_cast<int>(hc.load));
     }
     const int legend_max_chars = std::max(0, (status_panel.w - (2 * kToolbarLayout.panel_inset)) / 6);
     if (static_cast<int>(legend.size()) > legend_max_chars) {

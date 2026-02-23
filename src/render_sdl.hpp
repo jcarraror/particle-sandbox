@@ -27,6 +27,12 @@ struct MaterialButton {
   const char* hotkey{}; /**< Keyboard shortcut hint shown in the toolbar. */
 };
 
+enum class DebugView : std::uint8_t {
+  None = 0,
+  Pressure,
+  Load,
+};
+
 /**
  * @brief SDL renderer state and draw helpers.
  */
@@ -79,7 +85,7 @@ struct RendererSDL {
    * @param mouse_x Mouse X in window pixels.
    * @param mouse_y Mouse Y in window pixels.
    * @param paused Whether simulation stepping is paused.
-   * @param show_pressure_debug Whether to render pressure field visualization.
+   * @param debug_view Debug visualization mode.
    */
   void draw(const World& world,
             CellType selected,
@@ -87,7 +93,7 @@ struct RendererSDL {
             int mouse_x,
             int mouse_y,
             bool paused,
-            bool show_pressure_debug);
+            DebugView debug_view);
 
   /**
    * @brief Converts window mouse coordinates to grid coordinates.

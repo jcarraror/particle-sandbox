@@ -35,6 +35,7 @@ struct Cell {
   std::uint8_t updated{0};        /**< Tick stamp used to prevent double-stepping. */
   std::int16_t temp{20};          /**< Approximate temperature in arbitrary units. */
   std::int16_t pressure{0};       /**< Local pressure heuristic field. */
+  std::int16_t load{0};           /**< Dense structural load heuristic field. */
 };
 
 /**
