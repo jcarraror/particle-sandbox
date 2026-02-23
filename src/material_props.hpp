@@ -34,7 +34,8 @@ constexpr std::array<MaterialProps, 8> kMaterialProps{{
 static_assert(kMaterialProps.size() == 8);
 
 constexpr const MaterialProps& material_props(CellType t) {
-  return kMaterialProps[static_cast<std::size_t>(t)];
+  const std::size_t idx = is_valid_cell_type(t) ? static_cast<std::size_t>(t) : 0u;
+  return kMaterialProps[idx];
 }
 
 }  // namespace sim

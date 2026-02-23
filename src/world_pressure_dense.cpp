@@ -68,10 +68,8 @@ constexpr int kDenseLoadLateralSpillPasses = 2;
 constexpr int kDenseLoadLateralSpillLoss = 24;
 constexpr int kDenseLoadLateralSpillBlendNumerator = 1;
 constexpr int kDenseLoadLateralSpillBlendDenominator = 4;
-constexpr std::size_t kCellTypeCount = 8;
-
 constexpr std::size_t cell_type_index(CellType t) noexcept {
-  return static_cast<std::size_t>(t);
+  return is_valid_cell_type(t) ? static_cast<std::size_t>(t) : 0u;
 }
 
 struct DensePressureCoeffs {

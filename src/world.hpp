@@ -27,6 +27,12 @@ enum class CellType : std::uint8_t {
   Lava       /**< Dense hot liquid that emits smoke. */
 };
 
+inline constexpr std::size_t kCellTypeCount = 8;
+
+constexpr bool is_valid_cell_type(CellType t) noexcept {
+  return static_cast<std::size_t>(t) < kCellTypeCount;
+}
+
 /**
  * @brief Simulation state for a single grid cell.
  */

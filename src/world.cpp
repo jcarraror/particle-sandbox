@@ -9,6 +9,19 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+
+void sanitize_cell(Cell& c) {
+  if (!is_valid_cell_type(c.type)) {
+    c = Cell{};
+    return;
+  }
+  c.pressure = static_cast<std::int16_t>(std::clamp<int>(c.pressure, 0, 240));
+  c.load = static_cast<std::int16_t>(std::max<int>(0, c.load));
+}
+
+}  // namespace
+
 /**
  * @brief Constructs a world and initializes immutable border walls.
  * @param width World width in cells.
@@ -307,4 +320,8 @@ void World::tick() {
   }
 
   pass_thermal_exchange();
+
+  for (int y = 1; y < h - 1; ++y) {
+    for (int x = 1; x < w - 1; ++x) sanitize_cell(at(x, y));
+  }
 }

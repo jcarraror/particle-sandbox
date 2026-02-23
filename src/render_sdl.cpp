@@ -18,10 +18,8 @@ static std::uint32_t argb(std::uint8_t a, std::uint8_t r, std::uint8_t g, std::u
 
 namespace {
 
-constexpr std::size_t kCellTypeCount = 8;
-
 constexpr std::size_t cell_type_index(CellType t) noexcept {
-  return static_cast<std::size_t>(t);
+  return is_valid_cell_type(t) ? static_cast<std::size_t>(t) : 0u;
 }
 
 enum class ColorModel : std::uint8_t {
