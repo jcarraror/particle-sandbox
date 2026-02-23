@@ -245,7 +245,7 @@ int compute_dense_pressure_target(const World& world, int x, int y, const Cell& 
     p += coeffs.crust_contact_bonus;
   }
 
-  if (c.temp > kAmbientTemp) {
+  if (coeffs.heat_bonus_step > 0 && c.temp > kAmbientTemp) {
     p += ((static_cast<int>(c.temp) - kAmbientTemp) / coeffs.heat_bonus_step) * coeffs.heat_bonus_amount;
   }
 

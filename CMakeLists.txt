@@ -66,7 +66,11 @@ if (BUILD_TESTING)
 
   if (Catch2_FOUND)
     add_executable(particle_sandbox_tests
-      tests/test_world_invariants.cpp
+      tests/world/test_world_invariants.cpp
+      tests/world/test_world_core_whitebox.cpp
+      tests/world/test_world_rules_whitebox.cpp
+      tests/world/test_world_thermo_whitebox.cpp
+      tests/world/test_world_pressure_whitebox.cpp
       src/world.cpp
       src/world_thermo.cpp
       src/world_pressure.cpp
@@ -86,7 +90,12 @@ if (BUILD_TESTING)
         set(PARTICLE_SANDBOX_COVERAGE_DIR "${CMAKE_BINARY_DIR}/coverage")
         set(PARTICLE_SANDBOX_COVERAGE_HTML "${PARTICLE_SANDBOX_COVERAGE_DIR}/index.html")
         add_custom_target(coverage
+          COMMAND ${CMAKE_COMMAND} -E rm -rf "${PARTICLE_SANDBOX_COVERAGE_DIR}"
           COMMAND ${CMAKE_COMMAND} -E make_directory "${PARTICLE_SANDBOX_COVERAGE_DIR}"
+          # Remove stale coverage artifacts (e.g. after file moves/renames) so gcovr
+          # doesn't try to resolve deleted source paths.
+          COMMAND find "${CMAKE_BINARY_DIR}" -name "*.gcda" -delete
+          COMMAND find "${CMAKE_BINARY_DIR}" -name "*.gcov" -delete
           COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
           COMMAND ${GCOVR_EXECUTABLE}
             -r "${CMAKE_SOURCE_DIR}"
