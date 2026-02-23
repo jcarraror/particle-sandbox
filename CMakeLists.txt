@@ -46,6 +46,8 @@ add_executable(particle_sandbox
   src/world_pressure_gas.cpp
   src/world_pressure_dense.cpp
   src/world_rules.cpp
+  src/render_core.cpp
+  src/render_font.cpp
   src/render_sdl.cpp
 )
 
@@ -71,6 +73,8 @@ if (BUILD_TESTING)
       tests/world/test_world_rules_whitebox.cpp
       tests/world/test_world_thermo_whitebox.cpp
       tests/world/test_world_pressure_whitebox.cpp
+      tests/render/test_render_sdl_pure.cpp
+      tests/render/test_render_sdl_integration.cpp
       src/world.cpp
       src/world_thermo.cpp
       src/world_pressure.cpp
@@ -129,8 +133,21 @@ find_package(SDL2 CONFIG QUIET)
 
 if (SDL2_FOUND)
   target_link_libraries(particle_sandbox PRIVATE SDL2::SDL2 SDL2::SDL2main)
+  if (TARGET particle_sandbox_tests)
+    target_sources(particle_sandbox_tests PRIVATE src/render_sdl.cpp)
+    target_sources(particle_sandbox_tests PRIVATE src/render_core.cpp)
+    target_sources(particle_sandbox_tests PRIVATE src/render_font.cpp)
+    target_link_libraries(particle_sandbox_tests PRIVATE SDL2::SDL2 SDL2::SDL2main)
+  endif()
 else()
   find_package(SDL2 REQUIRED)
   target_include_directories(particle_sandbox PRIVATE ${SDL2_INCLUDE_DIRS})
   target_link_libraries(particle_sandbox PRIVATE ${SDL2_LIBRARIES})
+  if (TARGET particle_sandbox_tests)
+    target_sources(particle_sandbox_tests PRIVATE src/render_sdl.cpp)
+    target_sources(particle_sandbox_tests PRIVATE src/render_core.cpp)
+    target_sources(particle_sandbox_tests PRIVATE src/render_font.cpp)
+    target_include_directories(particle_sandbox_tests PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(particle_sandbox_tests PRIVATE ${SDL2_LIBRARIES})
+  endif()
 endif()

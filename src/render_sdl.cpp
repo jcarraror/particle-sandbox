@@ -4,6 +4,9 @@
  */
 
 #include "render_sdl.hpp"
+#include "render_core.hpp"
+#include "render_font.hpp"
+#include "render_sdl_internal.hpp"
 
 #include <SDL.h>
 
@@ -14,49 +17,7 @@
 #include <utility>
 #include <vector>
 
-static std::uint32_t argb(std::uint8_t a, std::uint8_t r, std::uint8_t g, std::uint8_t b);
-
 namespace {
-
-constexpr std::size_t cell_type_index(CellType t) noexcept {
-  return is_valid_cell_type(t) ? static_cast<std::size_t>(t) : 0u;
-}
-
-enum class ColorModel : std::uint8_t {
-  Solid,
-  WallHeatTint,
-  SandHeatTint,
-  OilHeatTint,
-  WaterShimmer,
-  SmokeSteam,
-  FireGlow,
-  LavaGlow,
-};
-
-struct MaterialColorStyle {
-  ColorModel model{ColorModel::Solid};
-  std::uint8_t r{};
-  std::uint8_t g{};
-  std::uint8_t b{};
-  std::int16_t swatch_temp{20};
-};
-
-enum class PressurePalette : std::uint8_t {
-  Empty,
-  NeutralWall,
-  SmokeWarm,
-  LiquidCool,
-  LavaHot,
-  FireWarm,
-  SandEarth,
-  Fallback,
-};
-
-struct PressureDebugStyle {
-  PressurePalette palette{PressurePalette::Fallback};
-  int max_value{240};
-  bool use_load_field{false};
-};
 
 struct ToolbarLayout {
   int pad{12};
@@ -101,70 +62,110 @@ struct ToolbarTheme {
   std::uint32_t clear_text{};
 };
 
-constexpr std::array<MaterialColorStyle, kCellTypeCount> kMaterialColorStyles{{
-    {ColorModel::Solid, 0, 0, 0, 20},          // Empty
-    {ColorModel::WallHeatTint, 100, 100, 110, 20}, // Wall
-    {ColorModel::SandHeatTint, 210, 185, 85, 20},  // Sand
-    {ColorModel::WaterShimmer, 70, 125, 235, 20},  // Water
-    {ColorModel::OilHeatTint, 35, 35, 45, 20}, // Oil
-    {ColorModel::FireGlow, 220, 90, 25, 300},  // Fire
-    {ColorModel::SmokeSteam, 140, 140, 150, 20},   // Smoke
-    {ColorModel::LavaGlow, 185, 50, 12, 800},  // Lava
-}};
-
-constexpr std::array<PressureDebugStyle, kCellTypeCount> kPressureDebugStyles{{
-    {PressurePalette::Empty, 1, false},         // Empty
-    {PressurePalette::NeutralWall, 1, true},    // Wall
-    {PressurePalette::SandEarth, 320, true},    // Sand
-    {PressurePalette::LiquidCool, 320, true},   // Water
-    {PressurePalette::LiquidCool, 320, true},   // Oil
-    {PressurePalette::FireWarm, 180, false},    // Fire
-    {PressurePalette::SmokeWarm, 220, false},   // Smoke
-    {PressurePalette::LavaHot, 420, true},      // Lava
-}};
-
-constexpr MaterialColorStyle material_color_style(CellType t) noexcept {
-  return kMaterialColorStyles[cell_type_index(t)];
-}
-
-constexpr PressureDebugStyle pressure_debug_style(CellType t) noexcept {
-  return kPressureDebugStyles[cell_type_index(t)];
-}
-
 constexpr ToolbarLayout kToolbarLayout{};
 constexpr int kLoadDebugRangeMin = 0;
 constexpr int kLoadDebugRangeMax = 480;
 
 const ToolbarTheme kToolbarTheme{
-    .frame_bg = argb(255, 10, 10, 12),
-    .toolbar_bg = argb(255, 18, 18, 22),
-    .toolbar_border = argb(255, 70, 70, 85),
-    .button_bg = argb(255, 24, 24, 30),
-    .button_hover_bg = argb(255, 32, 32, 40),
-    .button_selected_bg = argb(255, 40, 40, 50),
-    .button_border = argb(255, 85, 85, 100),
-    .button_selected_border = argb(255, 255, 255, 255),
-    .icon_fg = argb(255, 220, 220, 230),
-    .panel_bg = argb(255, 22, 24, 30),
-    .panel_top_bg = argb(255, 32, 35, 45),
-    .panel_border = argb(255, 70, 78, 100),
-    .status_text = argb(255, 220, 226, 240),
-    .legend_text = argb(255, 172, 186, 205),
-    .random_bg = argb(255, 30, 56, 64),
-    .random_hover_bg = argb(255, 42, 76, 88),
-    .random_top_bg = argb(255, 48, 86, 96),
-    .random_hover_top_bg = argb(255, 64, 114, 128),
-    .random_border = argb(255, 105, 170, 185),
-    .random_text = argb(255, 226, 242, 244),
-    .clear_bg = argb(255, 64, 32, 32),
-    .clear_hover_bg = argb(255, 88, 44, 44),
-    .clear_top_bg = argb(255, 96, 48, 48),
-    .clear_hover_top_bg = argb(255, 125, 64, 64),
-    .clear_border = argb(255, 185, 105, 105),
-    .clear_text = argb(255, 244, 226, 226),
+    .frame_bg = render_core::argb(255, 10, 10, 12),
+    .toolbar_bg = render_core::argb(255, 18, 18, 22),
+    .toolbar_border = render_core::argb(255, 70, 70, 85),
+    .button_bg = render_core::argb(255, 24, 24, 30),
+    .button_hover_bg = render_core::argb(255, 32, 32, 40),
+    .button_selected_bg = render_core::argb(255, 40, 40, 50),
+    .button_border = render_core::argb(255, 85, 85, 100),
+    .button_selected_border = render_core::argb(255, 255, 255, 255),
+    .icon_fg = render_core::argb(255, 220, 220, 230),
+    .panel_bg = render_core::argb(255, 22, 24, 30),
+    .panel_top_bg = render_core::argb(255, 32, 35, 45),
+    .panel_border = render_core::argb(255, 70, 78, 100),
+    .status_text = render_core::argb(255, 220, 226, 240),
+    .legend_text = render_core::argb(255, 172, 186, 205),
+    .random_bg = render_core::argb(255, 30, 56, 64),
+    .random_hover_bg = render_core::argb(255, 42, 76, 88),
+    .random_top_bg = render_core::argb(255, 48, 86, 96),
+    .random_hover_top_bg = render_core::argb(255, 64, 114, 128),
+    .random_border = render_core::argb(255, 105, 170, 185),
+    .random_text = render_core::argb(255, 226, 242, 244),
+    .clear_bg = render_core::argb(255, 64, 32, 32),
+    .clear_hover_bg = render_core::argb(255, 88, 44, 44),
+    .clear_top_bg = render_core::argb(255, 96, 48, 48),
+    .clear_hover_top_bg = render_core::argb(255, 125, 64, 64),
+    .clear_border = render_core::argb(255, 185, 105, 105),
+    .clear_text = render_core::argb(255, 244, 226, 226),
 };
 
 }  // namespace
+
+namespace render_sdl_detail {
+
+namespace {
+
+int sdl_init_video_default() { return SDL_Init(SDL_INIT_VIDEO); }
+
+SDL_Window* sdl_create_window_default(const char* title, int x, int y, int w, int h, unsigned flags) {
+  return SDL_CreateWindow(title, x, y, w, h, flags);
+}
+
+SDL_Renderer* sdl_create_renderer_default(SDL_Window* window, int index, unsigned flags) {
+  return SDL_CreateRenderer(window, index, flags);
+}
+
+SDL_Texture* sdl_create_texture_default(SDL_Renderer* renderer, unsigned format, int access, int w, int h) {
+  return SDL_CreateTexture(renderer, format, access, w, h);
+}
+
+const SdlApi kDefaultSdlApi{
+    .init_video = &sdl_init_video_default,
+    .get_error = &SDL_GetError,
+    .create_window = &sdl_create_window_default,
+    .create_renderer = &sdl_create_renderer_default,
+    .create_texture = &sdl_create_texture_default,
+};
+
+}  // namespace
+
+const SdlApi& sdl_api() noexcept {
+  return kDefaultSdlApi;
+}
+
+std::expected<RendererSDL, std::string> create_with_api(
+    int gw, int gh, int s, int toolbar_h_px, const SdlApi& api) {
+  if (api.init_video() != 0) {
+    return std::unexpected(std::string("SDL_Init failed: ") + api.get_error());
+  }
+
+  RendererSDL r;
+  r.owns_sdl_video = true;
+  r.scale = (s <= 0) ? 1 : s;
+  r.grid_w = gw;
+  r.grid_h = gh;
+  r.toolbar_h = (toolbar_h_px < 48) ? 48 : toolbar_h_px;
+
+  r.win_w = r.grid_w * r.scale;
+  r.win_h = r.toolbar_h + r.grid_h * r.scale;
+
+  r.window = api.create_window("Particle Sandbox (C++23)",
+                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                               r.win_w, r.win_h, SDL_WINDOW_SHOWN);
+  if (!r.window) return std::unexpected(std::string("SDL_CreateWindow failed: ") + api.get_error());
+
+  r.renderer = api.create_renderer(r.window, -1, SDL_RENDERER_ACCELERATED);
+  if (!r.renderer) {
+    // Some headless drivers don't support accelerated renderers.
+    r.renderer = api.create_renderer(r.window, -1, SDL_RENDERER_SOFTWARE);
+  }
+  if (!r.renderer) return std::unexpected(std::string("SDL_CreateRenderer failed: ") + api.get_error());
+
+  r.texture = api.create_texture(r.renderer, SDL_PIXELFORMAT_ARGB8888,
+                                 SDL_TEXTUREACCESS_STREAMING, r.grid_w, r.grid_h);
+  if (!r.texture) return std::unexpected(std::string("SDL_CreateTexture failed: ") + api.get_error());
+
+  r.pixels.resize(static_cast<std::size_t>(r.grid_w * r.grid_h), 0);
+  return r;
+}
+
+}  // namespace render_sdl_detail
 
 /**
  * @brief Packs channels into ARGB8888.
@@ -174,10 +175,6 @@ const ToolbarTheme kToolbarTheme{
  * @param b Blue channel.
  * @return Packed 32-bit color.
  */
-static std::uint32_t argb(std::uint8_t a, std::uint8_t r, std::uint8_t g, std::uint8_t b) {
-  return (std::uint32_t(a) << 24) | (std::uint32_t(r) << 16) | (std::uint32_t(g) << 8) | std::uint32_t(b);
-}
-
 /**
  * @brief Sets SDL renderer draw color from ARGB8888.
  * @param r SDL renderer pointer.
@@ -196,191 +193,6 @@ static void set_draw_color(SDL_Renderer* r, std::uint32_t c) {
  * @param c Input cell state.
  * @return Packed ARGB color.
  */
-static std::uint32_t color_for(const Cell& c) {
-  auto heat = [](int t) -> std::uint8_t {
-    int v = (t - 20) / 4;
-    v = (v < 0) ? 0 : (v > 60 ? 60 : v);
-    return static_cast<std::uint8_t>(v);
-  };
-  const std::uint8_t h = heat(c.temp);
-  const MaterialColorStyle style = material_color_style(c.type);
-
-  switch (style.model) {
-    case ColorModel::Solid:
-      return argb(255, style.r, style.g, style.b);
-    case ColorModel::WallHeatTint: {
-      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 120));
-      return argb(255,
-                  static_cast<std::uint8_t>(style.r + glow / 2),
-                  static_cast<std::uint8_t>(style.g + glow / 4),
-                  static_cast<std::uint8_t>(style.b - std::min<int>(glow / 6, style.b / 3)));
-    }
-    case ColorModel::SandHeatTint: {
-      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 100));
-      return argb(255,
-                  static_cast<std::uint8_t>(style.r + glow / 3),
-                  static_cast<std::uint8_t>(style.g + glow / 10),
-                  static_cast<std::uint8_t>(std::max<int>(15, style.b - glow / 2)));
-    }
-    case ColorModel::OilHeatTint: {
-      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 110));
-      return argb(255,
-                  static_cast<std::uint8_t>(style.r + glow),
-                  static_cast<std::uint8_t>(style.g + (glow * 3) / 4),
-                  static_cast<std::uint8_t>(style.b + glow / 4));
-    }
-    case ColorModel::WaterShimmer: {
-      const std::uint8_t shimmer = static_cast<std::uint8_t>(std::min<int>(h, 48));
-      return argb(255,
-                  static_cast<std::uint8_t>(style.r + shimmer / 3),
-                  static_cast<std::uint8_t>(style.g + shimmer / 2),
-                  static_cast<std::uint8_t>(style.b - shimmer / 4));
-    }
-    case ColorModel::SmokeSteam: {
-      const std::uint8_t steam = static_cast<std::uint8_t>(std::min<int>(h, 55));
-      return argb(255,
-                  static_cast<std::uint8_t>(style.r + steam),
-                  static_cast<std::uint8_t>(style.g + steam),
-                  static_cast<std::uint8_t>(style.b + steam / 2));
-    }
-    case ColorModel::FireGlow:
-      return argb(255, static_cast<std::uint8_t>(style.r + h / 2),
-                  static_cast<std::uint8_t>(style.g + h), style.b);
-    case ColorModel::LavaGlow:
-      return argb(255, static_cast<std::uint8_t>(style.r + h),
-                  static_cast<std::uint8_t>(style.g + h / 2), style.b);
-    default:
-      return argb(255, 255, 0, 255);
-  }
-}
-
-static std::uint32_t color_for_pressure_debug(const Cell& c) {
-  auto norm255 = [](int p, int max_p) -> std::uint8_t {
-    const int v = std::clamp((p * 255) / std::max(1, max_p), 0, 255);
-    return static_cast<std::uint8_t>(v);
-  };
-  auto smoke_pressure_color = [](std::uint8_t t) -> std::uint32_t {
-    return argb(255,
-                static_cast<std::uint8_t>(90 + (t * 165) / 255),
-                static_cast<std::uint8_t>(70 + (t * 185) / 255),
-                static_cast<std::uint8_t>(35 + (t * 90) / 255));
-  };
-  auto liquid_pressure_color = [](std::uint8_t t) -> std::uint32_t {
-    return argb(255,
-                static_cast<std::uint8_t>(10 + (t * 120) / 255),
-                static_cast<std::uint8_t>(40 + (t * 190) / 255),
-                static_cast<std::uint8_t>(80 + (t * 175) / 255));
-  };
-  auto lava_pressure_color = [](std::uint8_t t) -> std::uint32_t {
-    const std::uint8_t t2 = static_cast<std::uint8_t>((int(t) * int(t)) / 255);
-    return argb(255,
-                static_cast<std::uint8_t>(70 + (t * 175) / 255),
-                static_cast<std::uint8_t>(18 + (t2 * 185) / 255),
-                static_cast<std::uint8_t>(8 + (t2 * 44) / 255));
-  };
-  auto fire_pressure_color = [](std::uint8_t t) -> std::uint32_t {
-    return argb(255,
-                static_cast<std::uint8_t>(120 + (t * 135) / 255),
-                static_cast<std::uint8_t>(30 + (t * 140) / 255),
-                static_cast<std::uint8_t>(10 + (t * 40) / 255));
-  };
-  auto sand_pressure_color = [](std::uint8_t t) -> std::uint32_t {
-    return argb(255,
-                static_cast<std::uint8_t>(80 + (t * 120) / 255),
-                static_cast<std::uint8_t>(70 + (t * 110) / 255),
-                static_cast<std::uint8_t>(45 + (t * 60) / 255));
-  };
-
-  const PressureDebugStyle style = pressure_debug_style(c.type);
-  const int debug_scalar = style.use_load_field ? static_cast<int>(c.load) : static_cast<int>(c.pressure);
-  const int p = std::clamp(debug_scalar, 0, style.max_value);
-
-  switch (style.palette) {
-    case PressurePalette::Empty:
-      return argb(255, 0, 0, 0);
-    case PressurePalette::NeutralWall:
-      return argb(255, 70, 70, 78);
-    case PressurePalette::SmokeWarm: {
-      // Gas pressure: warm yellow/white for trapped steam pockets.
-      const std::uint8_t t = norm255(p, style.max_value);
-      return smoke_pressure_color(t);
-    }
-    case PressurePalette::LiquidCool: {
-      // Liquid pressure: deep blue -> cyan -> pale white.
-      const std::uint8_t t = norm255(p, style.max_value);
-      return liquid_pressure_color(t);
-    }
-    case PressurePalette::LavaHot: {
-      // Lava pressure: dark maroon -> red -> orange -> yellow
-      const std::uint8_t t = norm255(p, style.max_value);
-      return lava_pressure_color(t);
-    }
-    case PressurePalette::FireWarm: {
-      const std::uint8_t t = norm255(p, style.max_value);
-      return fire_pressure_color(t);
-    }
-    case PressurePalette::SandEarth: {
-      const std::uint8_t t = norm255(p, style.max_value);
-      return sand_pressure_color(t);
-    }
-    default:
-      return argb(255, 255, 0, 255);
-  }
-}
-
-static std::uint32_t color_for_load_debug(const Cell& c, int range_min, int range_max) {
-  if (c.type == CellType::Empty) return argb(255, 0, 0, 0);
-  if (c.type == CellType::Smoke || c.type == CellType::Fire) return argb(255, 20, 20, 24);
-
-  auto norm255 = [](int v, int lo, int hi) -> std::uint8_t {
-    const int denom = std::max(1, hi - lo);
-    const int clamped = std::clamp(v, lo, hi);
-    const int scaled = ((clamped - lo) * 255) / denom;
-    return static_cast<std::uint8_t>(scaled);
-  };
-  auto contrast = [](std::uint8_t t) -> std::uint8_t {
-    // Gamma remap to separate midrange values visually.
-    return static_cast<std::uint8_t>((int(t) * int(t)) / 255);
-  };
-
-  const int raw = std::max(0, static_cast<int>(c.load));
-  const std::uint8_t t = norm255(raw, range_min, range_max);
-  const std::uint8_t tc = contrast(t);
-
-  switch (c.type) {
-    case CellType::Lava:
-      return argb(255,
-                  static_cast<std::uint8_t>(110 + (t * 145) / 255),
-                  static_cast<std::uint8_t>(38 + (tc * 175) / 255),
-                  static_cast<std::uint8_t>(12 + (tc * 56) / 255));
-    case CellType::Wall:
-      return argb(255,
-                  static_cast<std::uint8_t>(40 + (tc * 120) / 255),
-                  static_cast<std::uint8_t>(40 + (tc * 120) / 255),
-                  static_cast<std::uint8_t>(46 + (tc * 110) / 255));
-    case CellType::Sand:
-      return argb(255,
-                  static_cast<std::uint8_t>(55 + (t * 150) / 255),
-                  static_cast<std::uint8_t>(45 + (tc * 135) / 255),
-                  static_cast<std::uint8_t>(24 + (tc * 70) / 255));
-    case CellType::Water:
-    case CellType::Oil:
-      return argb(255,
-                  static_cast<std::uint8_t>(8 + (tc * 95) / 255),
-                  static_cast<std::uint8_t>(30 + (t * 165) / 255),
-                  static_cast<std::uint8_t>(60 + (t * 180) / 255));
-    default:
-      return argb(255, 255, 0, 255);
-  }
-}
-
-/**
- * @brief Glyph entry for the built-in 5x7 pixel font.
- */
-struct Glyph {
-  char c;
-  std::array<std::uint8_t, 7> rows;
-};
 
 constexpr std::array<MaterialButton, 8> kMaterialButtons{{
     {CellType::Sand, "SAND", "[1]"},
@@ -394,72 +206,10 @@ constexpr std::array<MaterialButton, 8> kMaterialButtons{{
 }};
 
 /**
- * @brief Font table for UI text rendering.
- */
-static constexpr std::array<Glyph, 45> FONT = {{
-  {' ', {0, 0, 0, 0, 0, 0, 0}},
-  {':', {0, 4, 4, 0, 4, 4, 0}},
-  {'-', {0, 0, 0, 31, 0, 0, 0}},
-  {'/', {1, 2, 4, 8, 16, 0, 0}},
-  {'[', {14, 8, 8, 8, 8, 8, 14}},
-  {']', {14, 2, 2, 2, 2, 2, 14}},
-
-  {'0', {14, 17, 19, 21, 25, 17, 14}},
-  {'1', {4, 12, 4, 4, 4, 4, 14}},
-  {'2', {14, 17, 1, 2, 4, 8, 31}},
-  {'3', {31, 2, 4, 2, 1, 17, 14}},
-  {'4', {2, 6, 10, 18, 31, 2, 2}},
-  {'5', {31, 16, 30, 1, 1, 17, 14}},
-  {'6', {6, 8, 16, 30, 17, 17, 14}},
-  {'7', {31, 1, 2, 4, 8, 8, 8}},
-  {'8', {14, 17, 17, 14, 17, 17, 14}},
-  {'9', {14, 17, 17, 15, 1, 2, 12}},
-
-  {'A', {14, 17, 17, 31, 17, 17, 17}},
-  {'B', {30, 17, 17, 30, 17, 17, 30}},
-  {'C', {14, 17, 16, 16, 16, 17, 14}},
-  {'D', {30, 17, 17, 17, 17, 17, 30}},
-  {'E', {31, 16, 16, 30, 16, 16, 31}},
-  {'F', {31, 16, 16, 30, 16, 16, 16}},
-  {'G', {14, 17, 16, 23, 17, 17, 15}},
-  {'H', {17, 17, 17, 31, 17, 17, 17}},
-  {'I', {14, 4, 4, 4, 4, 4, 14}},
-  {'J', {1, 1, 1, 1, 17, 17, 14}},
-  {'K', {17, 18, 20, 24, 20, 18, 17}},
-  {'L', {16, 16, 16, 16, 16, 16, 31}},
-  {'M', {17, 27, 21, 21, 17, 17, 17}},
-  {'N', {17, 25, 21, 19, 17, 17, 17}},
-  {'O', {14, 17, 17, 17, 17, 17, 14}},
-  {'P', {30, 17, 17, 30, 16, 16, 16}},
-  {'Q', {14, 17, 17, 17, 21, 18, 13}},
-  {'R', {30, 17, 17, 30, 20, 18, 17}},
-  {'S', {15, 16, 16, 14, 1, 1, 30}},
-  {'T', {31, 4, 4, 4, 4, 4, 4}},
-  {'U', {17, 17, 17, 17, 17, 17, 14}},
-  {'V', {17, 17, 17, 17, 17, 10, 4}},
-  {'W', {17, 17, 17, 21, 21, 21, 10}},
-  {'X', {17, 17, 10, 4, 10, 17, 17}},
-  {'Y', {17, 17, 10, 4, 4, 4, 4}},
-  {'Z', {31, 1, 2, 4, 8, 16, 31}},
-}};
-
-/**
- * @brief Finds a glyph in the built-in font table.
- * @param c Character to lookup.
- * @return Matching glyph or `nullptr` if unsupported.
- */
-static const Glyph* glyph_for(char c) {
-  for (const auto& g : FONT) {
-    if (g.c == c) return &g;
-  }
-  return nullptr;
-}
-
-/**
  * @brief Draws a single character using the pixel font.
  */
 static void draw_char(SDL_Renderer* r, int x, int y, char c, int scale, std::uint32_t color) {
-  const Glyph* g = glyph_for(c);
+  const render_font::Glyph5x7* g = render_font::glyph_for(c);
   if (!g) return;
   set_draw_color(r, color);
   for (int row = 0; row < 7; ++row) {
@@ -494,10 +244,7 @@ std::span<const MaterialButton> RendererSDL::materials() {
  * @return Packed ARGB color.
  */
 static std::uint32_t material_swatch_color(CellType t) {
-  Cell tmp{};
-  tmp.type = t;
-  tmp.temp = material_color_style(t).swatch_temp;
-  return color_for(tmp);
+  return render_core::material_swatch_color(t);
 }
 
 /**
@@ -630,39 +377,11 @@ static void draw_icon(SDL_Renderer* r, const SDL_Rect& b, CellType t, std::uint3
       SDL_RenderDrawLine(r, b.x + b.w - 12, b.y + 12, b.x + 12, b.y + b.h - 12);
     } break;
 
-    default: break;
   }
 }
 
 std::expected<RendererSDL, std::string> RendererSDL::create(int gw, int gh, int s, int toolbar_h_px) {
-  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-    return std::unexpected(std::string("SDL_Init failed: ") + SDL_GetError());
-  }
-
-  RendererSDL r;
-  r.owns_sdl_video = true;
-  r.scale = (s <= 0) ? 1 : s;
-  r.grid_w = gw;
-  r.grid_h = gh;
-  r.toolbar_h = (toolbar_h_px < 48) ? 48 : toolbar_h_px;
-
-  r.win_w = r.grid_w * r.scale;
-  r.win_h = r.toolbar_h + r.grid_h * r.scale;
-
-  r.window = SDL_CreateWindow("Particle Sandbox (C++23)",
-                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              r.win_w, r.win_h, SDL_WINDOW_SHOWN);
-  if (!r.window) return std::unexpected(std::string("SDL_CreateWindow failed: ") + SDL_GetError());
-
-  r.renderer = SDL_CreateRenderer(r.window, -1, SDL_RENDERER_ACCELERATED);
-  if (!r.renderer) return std::unexpected(std::string("SDL_CreateRenderer failed: ") + SDL_GetError());
-
-  r.texture = SDL_CreateTexture(r.renderer, SDL_PIXELFORMAT_ARGB8888,
-                                SDL_TEXTUREACCESS_STREAMING, r.grid_w, r.grid_h);
-  if (!r.texture) return std::unexpected(std::string("SDL_CreateTexture failed: ") + SDL_GetError());
-
-  r.pixels.resize(static_cast<std::size_t>(r.grid_w * r.grid_h), 0);
-  return r;
+  return render_sdl_detail::create_with_api(gw, gh, s, toolbar_h_px, render_sdl_detail::sdl_api());
 }
 
 RendererSDL::~RendererSDL() {
@@ -780,9 +499,9 @@ void RendererSDL::draw(const World& world,
     for (int x = 0; x < grid_w; ++x) {
       const Cell& c = world.at(x, y);
       pixels[static_cast<std::size_t>(y * grid_w + x)] =
-          show_pressure_debug ? color_for_pressure_debug(c)
-                              : show_load_debug ? color_for_load_debug(c, load_range_min, load_range_max)
-                                                : color_for(c);
+          show_pressure_debug ? render_core::color_for_pressure_debug(c)
+                              : show_load_debug ? render_core::color_for_load_debug(c, load_range_min, load_range_max)
+                                                : render_core::color_for_cell(c);
     }
   }
   SDL_UpdateTexture(texture, nullptr, pixels.data(), grid_w * int(sizeof(std::uint32_t)));
