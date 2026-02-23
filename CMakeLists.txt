@@ -12,6 +12,32 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(PARTICLE_SANDBOX_ENABLE_COVERAGE "Enable compiler coverage instrumentation" OFF)
+
+function(particle_sandbox_apply_common_warnings target_name)
+  if (MSVC)
+    target_compile_options(${target_name} PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+  endif()
+endfunction()
+
+function(particle_sandbox_enable_coverage target_name)
+  if (NOT PARTICLE_SANDBOX_ENABLE_COVERAGE)
+    return()
+  endif()
+  if (MSVC)
+    message(WARNING "Coverage instrumentation is only configured for GCC/Clang-like toolchains")
+    return()
+  endif()
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target_name} PRIVATE -O0 -g --coverage)
+    target_link_options(${target_name} PRIVATE --coverage)
+  else()
+    message(WARNING "Coverage instrumentation unsupported for compiler: ${CMAKE_CXX_COMPILER_ID}")
+  endif()
+endfunction()
+
 add_executable(particle_sandbox
   src/main.cpp
   src/world.cpp
@@ -24,12 +50,8 @@ add_executable(particle_sandbox
 )
 
 target_include_directories(particle_sandbox PRIVATE src)
-
-if (MSVC)
-  target_compile_options(particle_sandbox PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(particle_sandbox PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+particle_sandbox_apply_common_warnings(particle_sandbox)
+particle_sandbox_enable_coverage(particle_sandbox)
 
 if (BUILD_TESTING)
   find_package(Catch2 3 QUIET CONFIG)
@@ -54,12 +76,41 @@ if (BUILD_TESTING)
     )
     target_include_directories(particle_sandbox_tests PRIVATE src)
     target_link_libraries(particle_sandbox_tests PRIVATE ${PARTICLE_SANDBOX_CATCH2_TARGET})
-    if (MSVC)
-      target_compile_options(particle_sandbox_tests PRIVATE /W4 /permissive-)
-    else()
-      target_compile_options(particle_sandbox_tests PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
+    particle_sandbox_apply_common_warnings(particle_sandbox_tests)
+    particle_sandbox_enable_coverage(particle_sandbox_tests)
     add_test(NAME particle_sandbox_tests COMMAND particle_sandbox_tests)
+
+    if (PARTICLE_SANDBOX_ENABLE_COVERAGE)
+      find_program(GCOVR_EXECUTABLE gcovr)
+      if (GCOVR_EXECUTABLE)
+        set(PARTICLE_SANDBOX_COVERAGE_DIR "${CMAKE_BINARY_DIR}/coverage")
+        set(PARTICLE_SANDBOX_COVERAGE_HTML "${PARTICLE_SANDBOX_COVERAGE_DIR}/index.html")
+        add_custom_target(coverage
+          COMMAND ${CMAKE_COMMAND} -E make_directory "${PARTICLE_SANDBOX_COVERAGE_DIR}"
+          COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+          COMMAND ${GCOVR_EXECUTABLE}
+            -r "${CMAKE_SOURCE_DIR}"
+            "${CMAKE_BINARY_DIR}"
+            --filter "${CMAKE_SOURCE_DIR}/src"
+            --exclude "${CMAKE_SOURCE_DIR}/tests"
+          COMMAND ${GCOVR_EXECUTABLE}
+            -r "${CMAKE_SOURCE_DIR}"
+            "${CMAKE_BINARY_DIR}"
+            --filter "${CMAKE_SOURCE_DIR}/src"
+            --exclude "${CMAKE_SOURCE_DIR}/tests"
+            --html
+            --html-details
+            -o "${PARTICLE_SANDBOX_COVERAGE_HTML}"
+          WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+          DEPENDS particle_sandbox_tests
+          USES_TERMINAL
+          VERBATIM
+        )
+        message(STATUS "Coverage target enabled: cmake --build ${CMAKE_BINARY_DIR} --target coverage")
+      else()
+        message(STATUS "gcovr not found: skipping coverage target")
+      endif()
+    endif()
   else()
     message(STATUS "Catch2 not found: skipping particle_sandbox_tests target")
   endif()
