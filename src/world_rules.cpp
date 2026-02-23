@@ -625,9 +625,9 @@ void World::step_smoke(int x, int y, bool ltr) {
       c.temp <= simcfg::kSmokeCondenseTempThreshold &&
       !smoke_has_escape_route(*this, x, y) &&
       (rng.next_u32() % simcfg::kSmokeCondenseOddsDivisor) == 0u) {
-    c.type = CellType::Empty;
     c.temp = simcfg::kAmbientTemp;
     c.pressure = 0;
+    c.load = 0;
   }
 }
 
@@ -698,8 +698,9 @@ void World::step_fire(int x, int y) {
     return;
   }
   if ((r % simcfg::kFireExtinguishOddsDivisor) == 0u) {
-    c.type = CellType::Empty;
+    c.type = CellType::Smoke;
     c.temp = simcfg::kAmbientTemp;
+    c.pressure = 0;
     return;
   }
 }
