@@ -293,9 +293,11 @@ void World::tick() {
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
       Cell& c = at(x, y);
-      if (c.type == CellType::Empty || c.type == CellType::Wall) continue;
-      if (c.temp > 20) c.temp -= 1;
-      else if (c.temp < 20) c.temp += 1;
+      const auto& props = sim::material_props(c.type);
+      const int relax = static_cast<int>(props.ambient_relax_step);
+      if (relax <= 0) continue;
+      if (c.temp > 20) c.temp = static_cast<std::int16_t>(std::max<int>(20, static_cast<int>(c.temp) - relax));
+      else if (c.temp < 20) c.temp = static_cast<std::int16_t>(std::min<int>(20, static_cast<int>(c.temp) + relax));
     }
   }
 }
