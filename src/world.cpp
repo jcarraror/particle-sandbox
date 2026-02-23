@@ -23,6 +23,8 @@ std::expected<World, std::string> World::create(int width, int height, std::uint
   wld.w = width;
   wld.h = height;
   wld.cells.assign(static_cast<std::size_t>(width * height), Cell{});
+  wld.thermal_impulses.assign(static_cast<std::size_t>(width * height), 0);
+  wld.tick_count = 0;
   wld.rng = XorShift32(seed);
 
   for (int x = 0; x < width; ++x) {
@@ -93,6 +95,13 @@ bool World::is_empty(int x, int y) const {
   return at(x, y).type == CellType::Empty;
 }
 
+void World::add_thermal_impulse(int x, int y, int delta) {
+  if (!in_bounds(x, y) || delta == 0) return;
+  const std::size_t idx = static_cast<std::size_t>(y * w + x);
+  if (idx >= thermal_impulses.size()) return;
+  thermal_impulses[idx] += delta;
+}
+
 /**
  * @brief Moves one cell into a destination if that destination is empty.
  *
@@ -127,6 +136,8 @@ bool World::try_move(int x, int y, int nx, int ny) {
  */
 void World::clear() {
   for (auto& c : cells) c = Cell{};
+  std::fill(thermal_impulses.begin(), thermal_impulses.end(), 0);
+  tick_count = 0;
 
   for (int x = 0; x < w; ++x) {
     at(x, 0).type = CellType::Wall;
@@ -270,11 +281,18 @@ void World::paint_disc(int cx, int cy, int radius, CellType t) {
  * - Increment update stamp.
  * - Sweep bottom-up so falling materials resolve naturally.
  * - Randomize horizontal sweep direction per frame to reduce directional bias.
- * - Apply simple global cooling/heating back toward ambient temperature.
+ * - Apply thermal exchange and per-material equilibrium drift.
  */
 void World::tick() {
+  ++tick_count;
   stamp = static_cast<std::uint8_t>(stamp + 1);
   if (stamp == 0) stamp = 1;
+
+  if (thermal_impulses.size() != cells.size()) {
+    thermal_impulses.assign(cells.size(), 0);
+  } else {
+    std::fill(thermal_impulses.begin(), thermal_impulses.end(), 0);
+  }
 
   pass_pressure_update();
 
@@ -289,15 +307,4 @@ void World::tick() {
   }
 
   pass_thermal_exchange();
-
-  for (int y = 1; y < h - 1; ++y) {
-    for (int x = 1; x < w - 1; ++x) {
-      Cell& c = at(x, y);
-      const auto& props = sim::material_props(c.type);
-      const int relax = static_cast<int>(props.ambient_relax_step);
-      if (relax <= 0) continue;
-      if (c.temp > 20) c.temp = static_cast<std::int16_t>(std::max<int>(20, static_cast<int>(c.temp) - relax));
-      else if (c.temp < 20) c.temp = static_cast<std::int16_t>(std::min<int>(20, static_cast<int>(c.temp) + relax));
-    }
-  }
 }

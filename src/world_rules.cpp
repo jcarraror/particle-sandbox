@@ -4,6 +4,7 @@
  */
 
 #include "world.hpp"
+#include "material_props.hpp"
 
 #include <algorithm>
 #include <array>
@@ -49,16 +50,16 @@ constexpr int kLavaWaterPressureSpike = 70;
 constexpr std::uint32_t kLavaWaterSteamBurstOddsDivisor = 5;
 constexpr int kLavaSteamBurstTempThreshold = 150;
 constexpr int kLavaSteamSpawnPressure = 180;
-constexpr int kLavaCrustCoolingPerWallNeighbor = 7;
-constexpr int kLavaCrustCoolingPerWetWallNeighbor = 11;
+constexpr int kLavaCrustCoolingPerWallNeighbor = 3;
+constexpr int kLavaCrustCoolingPerWetWallNeighbor = 6;
 constexpr int kLavaCrustTempThreshold = 260;
 constexpr int kLavaFastCrustTempThreshold = 140;
 constexpr std::uint32_t kLavaCrustOddsDivisorBase = 7;
 constexpr int kLavaCrustPropagateTempThreshold = 260;
 constexpr std::uint32_t kLavaCrustPropagateOddsDivisor = 6;
-constexpr int kLavaPassiveSolidifyTempThreshold = 120;
-constexpr std::uint32_t kLavaPassiveSolidifyOddsDivisor = 60;
-constexpr std::uint32_t kLavaPassiveSolidifyNearWallOddsDivisor = 18;
+constexpr int kLavaPassiveSolidifyTempThreshold = 90;
+constexpr std::uint32_t kLavaPassiveSolidifyOddsDivisor = 120;
+constexpr std::uint32_t kLavaPassiveSolidifyNearWallOddsDivisor = 36;
 constexpr int kWaterHeatAbsorbFromFire = 16;
 constexpr int kWaterHeatAbsorbFromLava = 10;
 constexpr int kWaterSteamTempThreshold = 140;
@@ -91,6 +92,10 @@ constexpr std::array<NeighborOffset, 8> kMooreOffsets{{
     {-1, -1}, {0, -1}, {1, -1},
     {-1, 0},           {1, 0},
     {-1, 1},  {0, 1},  {1, 1},
+}};
+
+constexpr std::array<NeighborOffset, 4> kCardinalOffsets{{
+    {0, -1}, {1, 0}, {0, 1}, {-1, 0},
 }};
 
 template <class Fn>
@@ -287,6 +292,50 @@ int count_adjacent_type(World& world, int x, int y, CellType t) {
   return count;
 }
 
+int count_cardinal_adjacent_type(World& world, int x, int y, CellType t) {
+  int count = 0;
+  for (const auto [dx, dy] : kCardinalOffsets) {
+    const int nx = x + dx;
+    const int ny = y + dy;
+    if (!world.in_bounds(nx, ny)) continue;
+    if (world.at(nx, ny).type == t) ++count;
+  }
+  return count;
+}
+
+int thermal_sink_score_around(World& world, int x, int y, int source_temp) {
+  int score = 0;
+  for (const auto [dx, dy] : kCardinalOffsets) {
+    const int nx = x + dx;
+    const int ny = y + dy;
+    if (!world.in_bounds(nx, ny)) continue;
+    const Cell& n = world.at(nx, ny);
+    if (n.type == CellType::Lava) continue;
+
+    if (n.type == CellType::Empty) {
+      score += 2;  // exposed surface cools faster in sandbox terms
+      continue;
+    }
+
+    const int temp_drop = std::max(0, source_temp - static_cast<int>(n.temp));
+    if (temp_drop <= 0) continue;
+
+    const auto& props = sim::material_props(n.type);
+    const int conductivity = static_cast<int>(props.thermal_conductivity);
+    const int capacity = std::max(1, static_cast<int>(props.heat_capacity));
+    int sink = 1 + (temp_drop / 120) + conductivity / 2;
+    sink = std::max(1, sink - capacity / 4);
+
+    // Water is a strong thermal sink and should still favor crusting.
+    if (n.type == CellType::Water) sink += 2;
+    // Solid contact (crust/wall) supports interface crust growth.
+    if (n.type == CellType::Wall) sink += 1;
+
+    score += std::clamp(sink, 0, 4);
+  }
+  return score;
+}
+
 int count_adjacent_wet_walls(World& world, int x, int y) {
   int count = 0;
   for_each_neighbor(world, x, y, [&](int nx, int ny, Cell& n) {
@@ -363,10 +412,17 @@ bool try_solidify_lava(World& world, int x, int y, int water_contacts) {
   if (c.type != CellType::Lava) return false;
 
   const int adjacent_wall = count_adjacent_type(world, x, y, CellType::Wall);
+  const int lava_neighbors = count_adjacent_type(world, x, y, CellType::Lava);
+  const int cardinal_lava_neighbors = count_cardinal_adjacent_type(world, x, y, CellType::Lava);
+  const int interface_score = thermal_sink_score_around(world, x, y, static_cast<int>(c.temp));
   const bool water_cooled = water_contacts > 0;
+  const bool interface_cell = interface_score > 0 || water_cooled;
+  const bool deep_interior = cardinal_lava_neighbors >= 4 && lava_neighbors >= 7 && !interface_cell;
   const bool cool_enough = c.temp <= simcfg::kLavaCrustTempThreshold;
   const bool nucleated_by_crust = adjacent_wall > 0 && c.temp <= simcfg::kLavaCrustPropagateTempThreshold;
-  const bool passively_solidifies = c.temp <= simcfg::kLavaPassiveSolidifyTempThreshold;
+  const bool passively_solidifies =
+      c.temp <= (deep_interior ? simcfg::kLavaPassiveSolidifyTempThreshold - 35
+                               : simcfg::kLavaPassiveSolidifyTempThreshold);
 
   if (!cool_enough && !nucleated_by_crust && !passively_solidifies) return false;
 
@@ -384,18 +440,31 @@ bool try_solidify_lava(World& world, int x, int y, int water_contacts) {
                                   : simcfg::kLavaPassiveSolidifyOddsDivisor;
   }
 
+  // Strongly prefer solidification at cooling interfaces and resist boxed interior fill.
+  if (interface_cell) {
+    const std::uint32_t interface_bonus = static_cast<std::uint32_t>(std::min(interface_score, 4));
+    divisor = std::max<std::uint32_t>(1u, divisor > interface_bonus ? divisor - interface_bonus : 1u);
+  } else if (deep_interior) {
+    divisor = std::max<std::uint32_t>(1u, divisor * 4u);
+  } else {
+    divisor = std::max<std::uint32_t>(1u, divisor * 2u);
+  }
+
   if ((world.rng.next_u32() % divisor) != 0u) return false;
 
   c.type = CellType::Wall;
   c.temp = static_cast<std::int16_t>(std::max(simcfg::kAmbientTemp, static_cast<int>(c.temp) / 2));
   c.pressure = 0;
 
-  // grow a thicker crust front by solidifying adjacent cooled lava.
+  // Grow crust inward from existing interfaces, but avoid "box fill" leaps into the core.
   int propagated = 0;
-  for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
-    if (propagated >= 2) return;
+  for_each_neighbor(world, x, y, [&](int nx, int ny, Cell& n) {
+    if (propagated >= 1) return;
     if (n.type != CellType::Lava) return;
     if (n.temp > simcfg::kLavaCrustPropagateTempThreshold) return;
+    const int n_interface = thermal_sink_score_around(world, nx, ny, static_cast<int>(n.temp));
+    const int n_cardinal_lava = count_cardinal_adjacent_type(world, nx, ny, CellType::Lava);
+    if (n_interface == 0 && n_cardinal_lava >= 4) return;
     if ((world.rng.next_u32() % simcfg::kLavaCrustPropagateOddsDivisor) != 0u) return;
     n.type = CellType::Wall;
     n.temp = static_cast<std::int16_t>(std::max(simcfg::kAmbientTemp, static_cast<int>(n.temp) / 2));
@@ -572,10 +641,28 @@ void World::step_smoke(int x, int y, bool ltr) {
  * @param amount Heat delta to add per affected neighbor.
  */
 void World::heat_neighbors(int x, int y, int amount) {
-  for_each_neighbor(*this, x, y, [&](int, int, Cell& n) {
+  const Cell& src = at(x, y);
+  const int source_temp = static_cast<int>(src.temp);
+  const int head = std::max(0, source_temp - simcfg::kAmbientTemp);
+  // Scale emitted heat by source temperature so cooling hot materials lose heating power.
+  const int scaled_amount = (head <= 0)
+                                ? 0
+                                : std::max(1, (amount * std::min(head, simcfg::kMaxNeighborHeatTemp)) /
+                                                 std::max(1, simcfg::kMaxNeighborHeatTemp));
+  if (scaled_amount <= 0) return;
+
+  for_each_neighbor(*this, x, y, [&](int nx, int ny, Cell& n) {
     if (n.type == CellType::Wall || n.type == CellType::Empty) return;
-    n.temp = static_cast<std::int16_t>(
-        clampi(n.temp + amount, simcfg::kMinCellTemp, simcfg::kMaxNeighborHeatTemp));
+
+    if (n.type == src.type) return;
+
+    // Rule-emitted heat should only raise cooler neighbors and should not exceed the source temp.
+    const int max_target = std::max(simcfg::kAmbientTemp, source_temp - 1);
+    if (n.temp >= max_target) return;
+
+    const int delta = std::min<int>(scaled_amount, max_target - static_cast<int>(n.temp));
+    if (delta <= 0) return;
+    add_thermal_impulse(nx, ny, delta);
   });
 }
 
@@ -594,8 +681,6 @@ void World::heat_neighbors(int x, int y, int amount) {
  */
 void World::step_fire(int x, int y) {
   Cell& c = at(x, y);
-  c.temp = static_cast<std::int16_t>(
-      clampi(c.temp + simcfg::kFireSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kFireMaxTemp));
   heat_neighbors(x, y, simcfg::kFireNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
   quench_fire_from_water(*this, x, y);
@@ -634,9 +719,6 @@ void World::step_fire(int x, int y) {
  * @param ltr Preferred lateral order determined by frame sweep direction.
  */
 void World::step_lava(int x, int y, bool ltr) {
-  Cell& c = at(x, y);
-  c.temp = static_cast<std::int16_t>(
-      clampi(c.temp + simcfg::kLavaSelfHeatPerTick, simcfg::kAmbientTemp, simcfg::kLavaMaxTemp));
   heat_neighbors(x, y, simcfg::kLavaNeighborHeatPerTick);
   ignite_oil_neighbors(*this, x, y);
   const LavaContactResult contact = trigger_lava_water_contact(*this, x, y);

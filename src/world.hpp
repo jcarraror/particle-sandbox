@@ -74,6 +74,8 @@ struct World {
   int w = 0;                 /**< World width in cells. */
   int h = 0;                 /**< World height in cells. */
   std::vector<Cell> cells;   /**< Row-major cell buffer. */
+  std::vector<int> thermal_impulses; /**< Per-tick thermal source/sink field (applied in thermal pass). */
+  std::uint64_t tick_count = 0; /**< Total simulation ticks advanced since last reset. */
   std::uint8_t stamp = 1;    /**< Current tick stamp. */
   XorShift32 rng;            /**< RNG used for movement/random events. */
 
@@ -204,4 +206,12 @@ private:
    * @brief Updates lightweight pressure heuristics for gas-like materials.
    */
   void pass_pressure_update();
+
+  /**
+   * @brief Accumulates a thermal source/sink impulse for a cell to be applied in the thermal pass.
+   * @param x Cell X.
+   * @param y Cell Y.
+   * @param delta Temperature delta contribution (can be negative).
+   */
+  void add_thermal_impulse(int x, int y, int delta);
 };

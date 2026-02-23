@@ -73,6 +73,9 @@ void accumulate_heat_exchange(const World& world,
 
 void World::pass_thermal_exchange() {
   std::vector<int> temp_deltas(cells.size(), 0);
+  if (thermal_impulses.size() != cells.size()) {
+    thermal_impulses.assign(cells.size(), 0);
+  }
 
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
@@ -97,9 +100,28 @@ void World::pass_thermal_exchange() {
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
       Cell& c = at(x, y);
-      const int next_temp =
-          clampi(static_cast<int>(c.temp) + temp_deltas[idx_of(*this, x, y)], kMinTemp, kMaxTemp);
-      c.temp = static_cast<std::int16_t>(next_temp);
+      const int exchanged = temp_deltas[idx_of(*this, x, y)];
+      const int impulse = thermal_impulses[idx_of(*this, x, y)];
+      const auto& props = sim::material_props(c.type);
+      int next_temp =
+          clampi(static_cast<int>(c.temp) + exchanged + impulse, kMinTemp, kMaxTemp);
+
+      const int relax = static_cast<int>(props.thermal_relax_step);
+      const int target = static_cast<int>(props.thermal_equilibrium_temp);
+      if (relax > 0) {
+        const bool exchange_pushed_hotter = (exchanged > 0) && (next_temp > target);
+        const bool exchange_pushed_colder = (exchanged < 0) && (next_temp < target);
+        // Preserve exchanged heat/cooling for at least one tick; otherwise small conduction
+        // steps get immediately erased by equilibrium drift (e.g. hot crust -> water).
+        if (!exchange_pushed_hotter && !exchange_pushed_colder) {
+          if (next_temp > target) next_temp = std::max(target, next_temp - relax);
+          else if (next_temp < target) next_temp = std::min(target, next_temp + relax);
+        }
+      }
+
+      c.temp = static_cast<std::int16_t>(clampi(next_temp, kMinTemp, kMaxTemp));
     }
   }
+
+  std::fill(thermal_impulses.begin(), thermal_impulses.end(), 0);
 }

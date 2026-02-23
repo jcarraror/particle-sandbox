@@ -26,6 +26,9 @@ constexpr std::size_t cell_type_index(CellType t) noexcept {
 
 enum class ColorModel : std::uint8_t {
   Solid,
+  WallHeatTint,
+  SandHeatTint,
+  OilHeatTint,
   WaterShimmer,
   SmokeSteam,
   FireGlow,
@@ -102,10 +105,10 @@ struct ToolbarTheme {
 
 constexpr std::array<MaterialColorStyle, kCellTypeCount> kMaterialColorStyles{{
     {ColorModel::Solid, 0, 0, 0, 20},          // Empty
-    {ColorModel::Solid, 100, 100, 110, 20},    // Wall
-    {ColorModel::Solid, 210, 185, 85, 20},     // Sand
+    {ColorModel::WallHeatTint, 100, 100, 110, 20}, // Wall
+    {ColorModel::SandHeatTint, 210, 185, 85, 20},  // Sand
     {ColorModel::WaterShimmer, 70, 125, 235, 20},  // Water
-    {ColorModel::Solid, 35, 35, 45, 20},       // Oil
+    {ColorModel::OilHeatTint, 35, 35, 45, 20}, // Oil
     {ColorModel::FireGlow, 220, 90, 25, 300},  // Fire
     {ColorModel::SmokeSteam, 140, 140, 150, 20},   // Smoke
     {ColorModel::LavaGlow, 185, 50, 12, 800},  // Lava
@@ -207,6 +210,27 @@ static std::uint32_t color_for(const Cell& c) {
   switch (style.model) {
     case ColorModel::Solid:
       return argb(255, style.r, style.g, style.b);
+    case ColorModel::WallHeatTint: {
+      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 120));
+      return argb(255,
+                  static_cast<std::uint8_t>(style.r + glow / 2),
+                  static_cast<std::uint8_t>(style.g + glow / 4),
+                  static_cast<std::uint8_t>(style.b - std::min<int>(glow / 6, style.b / 3)));
+    }
+    case ColorModel::SandHeatTint: {
+      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 100));
+      return argb(255,
+                  static_cast<std::uint8_t>(style.r + glow / 3),
+                  static_cast<std::uint8_t>(style.g + glow / 10),
+                  static_cast<std::uint8_t>(std::max<int>(15, style.b - glow / 2)));
+    }
+    case ColorModel::OilHeatTint: {
+      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 110));
+      return argb(255,
+                  static_cast<std::uint8_t>(style.r + glow),
+                  static_cast<std::uint8_t>(style.g + (glow * 3) / 4),
+                  static_cast<std::uint8_t>(style.b + glow / 4));
+    }
     case ColorModel::WaterShimmer: {
       const std::uint8_t shimmer = static_cast<std::uint8_t>(std::min<int>(h, 48));
       return argb(255,
@@ -869,8 +893,9 @@ void RendererSDL::draw(const World& world,
             2,
             kToolbarTheme.status_text);
 
+  std::string legend = "TICK: " + std::to_string(world.tick_count);
   if (show_pressure_debug || show_load_debug) {
-    std::string legend = show_load_debug
+    legend = show_load_debug
                              ? "LOAD: DENSE STRESS FIXED [" + std::to_string(load_range_min) + ".." +
                                    std::to_string(load_range_max) + "]"
                              : "PRESSURE: Y=SMOKE  C=LIQ  O=LAVA";
@@ -882,17 +907,17 @@ void RendererSDL::draw(const World& world,
                " P" + std::to_string(static_cast<int>(hc.pressure)) +
                " L" + std::to_string(static_cast<int>(hc.load));
     }
-    const int legend_max_chars = std::max(0, (status_panel.w - (2 * kToolbarLayout.panel_inset)) / 6);
-    if (static_cast<int>(legend.size()) > legend_max_chars) {
-      legend.resize(static_cast<std::size_t>(legend_max_chars));
-    }
-    draw_text(renderer,
-              status_panel.x + kToolbarLayout.panel_inset,
-              status_panel.y + kToolbarLayout.status_line2_y,
-              legend,
-              1,
-              kToolbarTheme.legend_text);
   }
+  const int legend_max_chars = std::max(0, (status_panel.w - (2 * kToolbarLayout.panel_inset)) / 6);
+  if (static_cast<int>(legend.size()) > legend_max_chars) {
+    legend.resize(static_cast<std::size_t>(legend_max_chars));
+  }
+  draw_text(renderer,
+            status_panel.x + kToolbarLayout.panel_inset,
+            status_panel.y + kToolbarLayout.status_line2_y,
+            legend,
+            1,
+            kToolbarTheme.legend_text);
 
   SDL_Rect dst{0, toolbar_h, grid_w * scale, grid_h * scale};
   SDL_RenderCopy(renderer, texture, nullptr, &dst);
