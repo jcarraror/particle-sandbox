@@ -7,8 +7,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
-
 #include "material_props.hpp"
 
 namespace {
@@ -72,7 +70,11 @@ void accumulate_heat_exchange(const World& world,
 }  // namespace
 
 void World::pass_thermal_exchange() {
-  std::vector<int> temp_deltas(cells.size(), 0);
+  if (thermal_temp_deltas.size() != cells.size()) {
+    thermal_temp_deltas.assign(cells.size(), 0);
+  } else {
+    std::fill(thermal_temp_deltas.begin(), thermal_temp_deltas.end(), 0);
+  }
   if (thermal_impulses.size() != cells.size()) {
     thermal_impulses.assign(cells.size(), 0);
   }
@@ -85,13 +87,13 @@ void World::pass_thermal_exchange() {
       if (x + 1 < w - 1) {
         const Cell& right = at(x + 1, y);
         if (right.type != CellType::Empty) {
-          accumulate_heat_exchange(*this, x, y, x + 1, y, temp_deltas);
+          accumulate_heat_exchange(*this, x, y, x + 1, y, thermal_temp_deltas);
         }
       }
       if (y + 1 < h - 1) {
         const Cell& down = at(x, y + 1);
         if (down.type != CellType::Empty) {
-          accumulate_heat_exchange(*this, x, y, x, y + 1, temp_deltas);
+          accumulate_heat_exchange(*this, x, y, x, y + 1, thermal_temp_deltas);
         }
       }
     }
@@ -100,7 +102,7 @@ void World::pass_thermal_exchange() {
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
       Cell& c = at(x, y);
-      const int exchanged = temp_deltas[idx_of(*this, x, y)];
+      const int exchanged = thermal_temp_deltas[idx_of(*this, x, y)];
       const int impulse = thermal_impulses[idx_of(*this, x, y)];
       const auto& props = sim::material_props(c.type);
       int next_temp =

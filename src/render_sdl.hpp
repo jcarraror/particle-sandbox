@@ -86,6 +86,7 @@ struct RendererSDL {
    * @param mouse_y Mouse Y in window pixels.
    * @param paused Whether simulation stepping is paused.
    * @param debug_view Debug visualization mode.
+   * @param fps rendered frames per second for UI diagnostics.
    */
   void draw(const World& world,
             CellType selected,
@@ -93,7 +94,8 @@ struct RendererSDL {
             int mouse_x,
             int mouse_y,
             bool paused,
-            DebugView debug_view);
+            DebugView debug_view,
+            int fps);
 
   /**
    * @brief Converts window mouse coordinates to grid coordinates.

@@ -24,6 +24,10 @@ std::int16_t damp_pressure(std::int16_t current, int target) noexcept {
 
 }  // namespace pressure_detail
 
+namespace {
+constexpr std::uint64_t kDensePressureRelaxEveryNTicks = 2;
+}
+
 void World::pass_pressure_update() {
   for (int y = 1; y < h - 1; ++y) {
     for (int x = 1; x < w - 1; ++x) {
@@ -47,5 +51,7 @@ void World::pass_pressure_update() {
     }
   }
 
-  pressure_detail::relax_dense_pressure(*this);
+  if ((tick_count % kDensePressureRelaxEveryNTicks) == 0) {
+    pressure_detail::relax_dense_pressure(*this);
+  }
 }

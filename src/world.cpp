@@ -11,6 +11,8 @@
 
 namespace {
 
+constexpr std::uint64_t kSanitizeEveryNTicks = 8;
+
 void sanitize_cell(Cell& c) {
   if (!is_valid_cell_type(c.type)) {
     c = Cell{};
@@ -37,6 +39,11 @@ std::expected<World, std::string> World::create(int width, int height, std::uint
   wld.h = height;
   wld.cells.assign(static_cast<std::size_t>(width * height), Cell{});
   wld.thermal_impulses.assign(static_cast<std::size_t>(width * height), 0);
+  wld.thermal_temp_deltas.assign(static_cast<std::size_t>(width * height), 0);
+  wld.pressure_relax_next.assign(static_cast<std::size_t>(width * height), 0);
+  wld.dense_load_seed.assign(static_cast<std::size_t>(width * height), 0);
+  wld.dense_load_curr.assign(static_cast<std::size_t>(width * height), 0);
+  wld.dense_load_next.assign(static_cast<std::size_t>(width * height), 0);
   wld.tick_count = 0;
   wld.rng = XorShift32(seed);
 
@@ -150,6 +157,16 @@ bool World::try_move(int x, int y, int nx, int ny) {
 void World::clear() {
   for (auto& c : cells) c = Cell{};
   std::fill(thermal_impulses.begin(), thermal_impulses.end(), 0);
+  if (thermal_temp_deltas.size() != cells.size()) thermal_temp_deltas.assign(cells.size(), 0);
+  else std::fill(thermal_temp_deltas.begin(), thermal_temp_deltas.end(), 0);
+  if (pressure_relax_next.size() != cells.size()) pressure_relax_next.assign(cells.size(), 0);
+  else std::fill(pressure_relax_next.begin(), pressure_relax_next.end(), 0);
+  if (dense_load_seed.size() != cells.size()) dense_load_seed.assign(cells.size(), 0);
+  else std::fill(dense_load_seed.begin(), dense_load_seed.end(), 0);
+  if (dense_load_curr.size() != cells.size()) dense_load_curr.assign(cells.size(), 0);
+  else std::fill(dense_load_curr.begin(), dense_load_curr.end(), 0);
+  if (dense_load_next.size() != cells.size()) dense_load_next.assign(cells.size(), 0);
+  else std::fill(dense_load_next.begin(), dense_load_next.end(), 0);
   tick_count = 0;
 
   for (int x = 0; x < w; ++x) {
@@ -306,6 +323,21 @@ void World::tick() {
   } else {
     std::fill(thermal_impulses.begin(), thermal_impulses.end(), 0);
   }
+  if (thermal_temp_deltas.size() != cells.size()) {
+    thermal_temp_deltas.assign(cells.size(), 0);
+  }
+  if (pressure_relax_next.size() != cells.size()) {
+    pressure_relax_next.assign(cells.size(), 0);
+  }
+  if (dense_load_seed.size() != cells.size()) {
+    dense_load_seed.assign(cells.size(), 0);
+  }
+  if (dense_load_curr.size() != cells.size()) {
+    dense_load_curr.assign(cells.size(), 0);
+  }
+  if (dense_load_next.size() != cells.size()) {
+    dense_load_next.assign(cells.size(), 0);
+  }
 
   pass_pressure_update();
 
@@ -321,7 +353,9 @@ void World::tick() {
 
   pass_thermal_exchange();
 
-  for (int y = 1; y < h - 1; ++y) {
-    for (int x = 1; x < w - 1; ++x) sanitize_cell(at(x, y));
+  if ((tick_count % kSanitizeEveryNTicks) == 0) {
+    for (int y = 1; y < h - 1; ++y) {
+      for (int x = 1; x < w - 1; ++x) sanitize_cell(at(x, y));
+    }
   }
 }

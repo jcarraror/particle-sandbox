@@ -81,6 +81,11 @@ struct World {
   int h = 0;                 /**< World height in cells. */
   std::vector<Cell> cells;   /**< Row-major cell buffer. */
   std::vector<int> thermal_impulses; /**< Per-tick thermal source/sink field (applied in thermal pass). */
+  std::vector<int> thermal_temp_deltas; /**< Scratch buffer reused by thermal pass to avoid per-tick allocations. */
+  std::vector<std::int16_t> pressure_relax_next; /**< Scratch pressure buffer reused by dense pressure relaxation. */
+  std::vector<int> dense_load_seed; /**< Scratch dense-load seed buffer (pressure pass). */
+  std::vector<int> dense_load_curr; /**< Scratch dense-load working buffer (pressure pass). */
+  std::vector<int> dense_load_next; /**< Scratch dense-load working buffer (pressure pass). */
   std::uint64_t tick_count = 0; /**< Total simulation ticks advanced since last reset. */
   std::uint8_t stamp = 1;    /**< Current tick stamp. */
   XorShift32 rng;            /**< RNG used for movement/random events. */

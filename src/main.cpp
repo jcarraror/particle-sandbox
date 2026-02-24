@@ -86,6 +86,8 @@ int main(int, char**) {
   update_title(ren, brush, brush_radius, paused);
 
   auto last = std::chrono::steady_clock::now();
+  double fps_ema = 0.0;
+  int fps_display = 0;
 
   int mx = 0, my = 0;
 
@@ -175,9 +177,16 @@ int main(int, char**) {
     }
     last = now;
 
+    const double dt_sec = std::chrono::duration<double>(dt).count();
+    if (dt_sec > 0.0) {
+      const double inst_fps = 1.0 / dt_sec;
+      fps_ema = (fps_ema <= 0.0) ? inst_fps : (fps_ema * 0.9 + inst_fps * 0.1);
+      fps_display = static_cast<int>(fps_ema + 0.5);
+    }
+
     if (!paused) world.tick();
 
-    ren.draw(world, brush, brush_radius, mx, my, paused, debug_view);
+    ren.draw(world, brush, brush_radius, mx, my, paused, debug_view, fps_display);
   }
 
   return 0;

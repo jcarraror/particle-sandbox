@@ -489,7 +489,8 @@ void RendererSDL::draw(const World& world,
                        int mouse_x,
                        int mouse_y,
                        bool paused,
-                       DebugView debug_view) {
+                       DebugView debug_view,
+                       int fps) {
   const bool show_pressure_debug = (debug_view == DebugView::Pressure);
   const bool show_load_debug = (debug_view == DebugView::Load);
   const int load_range_min = kLoadDebugRangeMin;
@@ -610,7 +611,7 @@ void RendererSDL::draw(const World& world,
             2,
             kToolbarTheme.status_text);
 
-  std::string legend = "TICK: " + std::to_string(world.tick_count);
+  std::string legend = "TICK: " + std::to_string(world.tick_count) + "  FPS: " + std::to_string(std::max(0, fps));
   if (show_pressure_debug || show_load_debug) {
     legend = show_load_debug
                              ? "LOAD: DENSE STRESS FIXED [" + std::to_string(load_range_min) + ".." +

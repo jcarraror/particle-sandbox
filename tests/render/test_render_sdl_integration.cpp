@@ -51,21 +51,21 @@ TEST_CASE("RendererSDL create and draw work in headless mode", "[render][sdl][in
   for (int i = 0; i < 4; ++i) world.tick();
 
   // Normal draw (no hover)
-  ren.draw(world, CellType::Sand, 3, -1, -1, false, DebugView::None);
+  ren.draw(world, CellType::Sand, 3, -1, -1, false, DebugView::None, 60);
 
   // Toolbar hover paths (material / random / clear).
-  ren.draw(world, CellType::Water, 2, 16, 20, true, DebugView::None);               // first material button
-  ren.draw(world, CellType::Oil, 2, ren.win_w - 200, 20, false, DebugView::None);    // random button area
-  ren.draw(world, CellType::Fire, 2, ren.win_w - 70, 20, false, DebugView::None);    // clear button area
+  ren.draw(world, CellType::Water, 2, 16, 20, true, DebugView::None, 60);               // first material button
+  ren.draw(world, CellType::Oil, 2, ren.win_w - 200, 20, false, DebugView::None, 60);    // random button area
+  ren.draw(world, CellType::Fire, 2, ren.win_w - 70, 20, false, DebugView::None, 60);    // clear button area
 
   // Debug views with grid hover for cell readout
   const int grid_hover_x = 4 * ren.scale;
   const int grid_hover_y = ren.toolbar_h + 4 * ren.scale;
-  ren.draw(world, CellType::Lava, 4, grid_hover_x, grid_hover_y, false, DebugView::Pressure);
-  ren.draw(world, CellType::Smoke, 1, grid_hover_x, grid_hover_y, false, DebugView::Load);
+  ren.draw(world, CellType::Lava, 4, grid_hover_x, grid_hover_y, false, DebugView::Pressure, 60);
+  ren.draw(world, CellType::Smoke, 1, grid_hover_x, grid_hover_y, false, DebugView::Load, 60);
 
   // Unknown selected type exercises mat_name fallback.
-  ren.draw(world, static_cast<CellType>(255), 1, -1, -1, false, DebugView::None);
+  ren.draw(world, static_cast<CellType>(255), 1, -1, -1, false, DebugView::None, 60);
 }
 
 TEST_CASE("RendererSDL move operations preserve resource ownership", "[render][sdl][integration]") {

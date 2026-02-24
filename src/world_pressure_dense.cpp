@@ -7,8 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <vector>
-
 namespace pressure_detail {
 namespace {
 
@@ -255,10 +253,29 @@ int compute_dense_pressure_target(const World& world, int x, int y, const Cell& 
 void relax_dense_pressure(World& world) {
   if (world.w < 3 || world.h < 3) return;
 
-  std::vector<std::int16_t> next(world.cells.size());
-  std::vector<int> load_seed(world.cells.size(), 0);
-  std::vector<int> load_curr(world.cells.size(), 0);
-  std::vector<int> load_next(world.cells.size(), 0);
+  if (world.pressure_relax_next.size() != world.cells.size()) {
+    world.pressure_relax_next.assign(world.cells.size(), 0);
+  }
+  if (world.dense_load_seed.size() != world.cells.size()) {
+    world.dense_load_seed.assign(world.cells.size(), 0);
+  } else {
+    std::fill(world.dense_load_seed.begin(), world.dense_load_seed.end(), 0);
+  }
+  if (world.dense_load_curr.size() != world.cells.size()) {
+    world.dense_load_curr.assign(world.cells.size(), 0);
+  } else {
+    std::fill(world.dense_load_curr.begin(), world.dense_load_curr.end(), 0);
+  }
+  if (world.dense_load_next.size() != world.cells.size()) {
+    world.dense_load_next.assign(world.cells.size(), 0);
+  } else {
+    std::fill(world.dense_load_next.begin(), world.dense_load_next.end(), 0);
+  }
+
+  auto& next = world.pressure_relax_next;
+  auto& load_seed = world.dense_load_seed;
+  auto& load_curr = world.dense_load_curr;
+  auto& load_next = world.dense_load_next;
 
   auto idx_of = [&](int x, int y) -> std::size_t {
     return static_cast<std::size_t>(y * world.w + x);
@@ -291,7 +308,7 @@ void relax_dense_pressure(World& world) {
   // Structural load pass:
   // 1) top-down accumulation (primary gravity-driven behavior)
   // 2) conservative lateral spill through connected dense structures (organic spread)
-  load_curr.assign(world.cells.size(), 0);
+  std::fill(load_curr.begin(), load_curr.end(), 0);
   for (int y = 1; y < world.h - 1; ++y) {
     for (int x = 1; x < world.w - 1; ++x) {
       const Cell& c = world.at(x, y);
@@ -315,7 +332,7 @@ void relax_dense_pressure(World& world) {
   }
 
   for (int pass = 0; pass < kDenseLoadLateralSpillPasses; ++pass) {
-    load_next = load_curr;
+    std::copy(load_curr.begin(), load_curr.end(), load_next.begin());
     for (int y = 1; y < world.h - 1; ++y) {
       for (int x = 1; x < world.w - 1; ++x) {
         const Cell& c = world.at(x, y);
@@ -349,7 +366,7 @@ void relax_dense_pressure(World& world) {
 
   // attenuation pass to avoid hard plateaus in very large masses.
   for (int pass = 0; pass < kDenseLoadPropagationPasses; ++pass) {
-    load_next = load_curr;
+    std::copy(load_curr.begin(), load_curr.end(), load_next.begin());
     for (int y = 1; y < world.h - 1; ++y) {
       for (int x = 1; x < world.w - 1; ++x) {
         const Cell& c = world.at(x, y);
