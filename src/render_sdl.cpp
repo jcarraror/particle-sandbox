@@ -194,7 +194,7 @@ static void set_draw_color(SDL_Renderer* r, std::uint32_t c) {
  * @return Packed ARGB color.
  */
 
-constexpr std::array<MaterialButton, 8> kMaterialButtons{{
+constexpr std::array<MaterialButton, 9> kMaterialButtons{{
     {CellType::Sand, "SAND", "[1]"},
     {CellType::Water, "WATER", "[2]"},
     {CellType::Oil, "OIL", "[3]"},
@@ -202,6 +202,7 @@ constexpr std::array<MaterialButton, 8> kMaterialButtons{{
     {CellType::Smoke, "SMOKE", "[5]"},
     {CellType::Lava, "LAVA", "[6]"},
     {CellType::Wall, "WALL", "[7]"},
+    {CellType::Stone, "STONE", "[8]"},
     {CellType::Empty, "ERASE", "[0]"},
 }};
 
@@ -370,6 +371,17 @@ static void draw_icon(SDL_Renderer* r, const SDL_Rect& b, CellType t, std::uint3
       SDL_RenderDrawLine(r, inner.x + inner.w / 2, inner.y, inner.x + inner.w / 2, inner.y + inner.h / 2);
       SDL_RenderDrawLine(r, inner.x + inner.w / 3, inner.y + inner.h / 2, inner.x + inner.w / 3, inner.y + inner.h);
       SDL_RenderDrawLine(r, inner.x + 2 * inner.w / 3, inner.y + inner.h / 2, inner.x + 2 * inner.w / 3, inner.y + inner.h);
+    } break;
+
+    // i just can't stop myself from drawing these idiot gryphs
+    case CellType::Stone: {
+      SDL_RenderDrawLine(r, b.x + 11, cy + 8, cx - 7, b.y + 15);
+      SDL_RenderDrawLine(r, cx - 7, b.y + 15, cx + 8, b.y + 12);
+      SDL_RenderDrawLine(r, cx + 8, b.y + 12, b.x + b.w - 11, cy + 4);
+      SDL_RenderDrawLine(r, b.x + b.w - 11, cy + 4, cx + 4, b.y + b.h - 11);
+      SDL_RenderDrawLine(r, cx + 4, b.y + b.h - 11, b.x + 14, b.y + b.h - 14);
+      SDL_RenderDrawLine(r, b.x + 14, b.y + b.h - 14, b.x + 11, cy + 8);
+      SDL_RenderDrawLine(r, cx - 3, cy - 2, cx + 2, cy + 3);
     } break;
 
     case CellType::Empty: {

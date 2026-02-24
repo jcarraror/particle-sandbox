@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <deque>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -82,6 +83,20 @@ int main(int, char**) {
 
   CellType brush = CellType::Sand;
   int brush_radius = 4;
+  bool was_painting_left = false;
+  bool was_painting_right = false;
+
+  constexpr std::size_t kUndoMaxSnapshots = 24;
+  std::deque<World> undo_stack;
+  auto push_undo_snapshot = [&]() {
+    undo_stack.push_back(world);
+    if (undo_stack.size() > kUndoMaxSnapshots) undo_stack.pop_front();
+  };
+  auto try_undo = [&]() {
+    if (undo_stack.empty()) return;
+    world = std::move(undo_stack.back());
+    undo_stack.pop_back();
+  };
 
   update_title(ren, brush, brush_radius, paused);
 
@@ -102,11 +117,21 @@ int main(int, char**) {
       }
 
       if (e.type == SDL_KEYDOWN) {
+        if (e.key.keysym.sym == SDLK_z && (e.key.keysym.mod & KMOD_CTRL)) {
+          try_undo();
+          continue;
+        }
         switch (e.key.keysym.sym) {
           case SDLK_ESCAPE: running = false; break;
           case SDLK_SPACE: paused = !paused; update_title(ren, brush, brush_radius, paused); break;
-          case SDLK_c: world.clear(); break;
-          case SDLK_r: world.generate_random_scene(); break;
+          case SDLK_c:
+            push_undo_snapshot();
+            world.clear();
+            break;
+          case SDLK_r:
+            push_undo_snapshot();
+            world.generate_random_scene();
+            break;
           case SDLK_p:
             debug_view = (debug_view == DebugView::Pressure) ? DebugView::None : DebugView::Pressure;
             break;
@@ -121,6 +146,7 @@ int main(int, char**) {
           case SDLK_5: brush = CellType::Smoke; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_6: brush = CellType::Lava; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_7: brush = CellType::Wall; update_title(ren, brush, brush_radius, paused); break;
+          case SDLK_8: brush = CellType::Stone; update_title(ren, brush, brush_radius, paused); break;
           case SDLK_0: brush = CellType::Empty; update_title(ren, brush, brush_radius, paused); break;
 
           case SDLK_MINUS:
@@ -145,8 +171,10 @@ int main(int, char**) {
         my = e.button.y;
 
         if (ren.hit_test_random_button(mx, my)) {
+          push_undo_snapshot();
           world.generate_random_scene();
         } else if (ren.hit_test_clear_button(mx, my)) {
+          push_undo_snapshot();
           world.clear();
         } else if (auto hit = ren.hit_test_toolbar(mx, my)) {
           brush = *hit;
@@ -159,14 +187,21 @@ int main(int, char**) {
     const bool in_grid = ren.mouse_to_grid(mx, my, gx, gy);
 
     const auto mstate = SDL_GetMouseState(nullptr, nullptr);
+    const bool paint_left = in_grid && (mstate & SDL_BUTTON(SDL_BUTTON_LEFT));
+    const bool paint_right = in_grid && (mstate & SDL_BUTTON(SDL_BUTTON_RIGHT));
+    if ((paint_left || paint_right) && !(was_painting_left || was_painting_right)) {
+      push_undo_snapshot();
+    }
     if (in_grid) {
-      if (mstate & SDL_BUTTON(SDL_BUTTON_LEFT)) {
+      if (paint_left) {
         world.paint_disc(gx, gy, brush_radius, brush);
       }
-      if (mstate & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
+      if (paint_right) {
         world.paint_disc(gx, gy, brush_radius, CellType::Empty);
       }
     }
+    was_painting_left = paint_left;
+    was_painting_right = paint_right;
 
     auto now = std::chrono::steady_clock::now();
     const auto dt = now - last;

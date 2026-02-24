@@ -10,6 +10,7 @@ enum class ColorModel : std::uint8_t {
   Fallback,
   Solid,
   WallHeatTint,
+  StoneHeatTint,
   SandHeatTint,
   OilHeatTint,
   WaterShimmer,
@@ -46,6 +47,7 @@ struct PressureDebugStyle {
 constexpr std::array<MaterialColorStyle, kCellTypeCount> kMaterialColorStyles{{
     {ColorModel::Solid, 0, 0, 0, 20},              // Empty
     {ColorModel::WallHeatTint, 100, 100, 110, 20}, // Wall
+    {ColorModel::StoneHeatTint, 118, 98, 78, 20},  // Stone
     {ColorModel::SandHeatTint, 210, 185, 85, 20},  // Sand
     {ColorModel::WaterShimmer, 70, 125, 235, 20},  // Water
     {ColorModel::OilHeatTint, 35, 35, 45, 20},     // Oil
@@ -56,8 +58,9 @@ constexpr std::array<MaterialColorStyle, kCellTypeCount> kMaterialColorStyles{{
 
 constexpr std::array<PressureDebugStyle, kCellTypeCount> kPressureDebugStyles{{
     {PressurePalette::Empty, 1, false},       // Empty
-    {PressurePalette::NeutralWall, 1, true},  // Wall
-    {PressurePalette::SandEarth, 320, true},  // Sand
+    {PressurePalette::NeutralWall, 1, true},   // Wall
+    {PressurePalette::SandEarth, 320, true},   // Stone
+    {PressurePalette::SandEarth, 320, true},   // Sand
     {PressurePalette::LiquidCool, 320, true}, // Water
     {PressurePalette::LiquidCool, 320, true}, // Oil
     {PressurePalette::FireWarm, 180, false},  // Fire
@@ -117,6 +120,13 @@ std::uint32_t color_for_cell(const Cell& c) noexcept {
                   static_cast<std::uint8_t>(style.r + glow / 2),
                   static_cast<std::uint8_t>(style.g + glow / 4),
                   static_cast<std::uint8_t>(style.b - std::min<int>(glow / 6, style.b / 3)));
+    }
+    case ColorModel::StoneHeatTint: {
+      const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 90));
+      return argb(255,
+                  static_cast<std::uint8_t>(style.r + glow / 3),
+                  static_cast<std::uint8_t>(style.g + glow / 6),
+                  static_cast<std::uint8_t>(std::max<int>(30, style.b - glow / 8)));
     }
     case ColorModel::SandHeatTint: {
       const std::uint8_t glow = static_cast<std::uint8_t>(std::min<int>(h * 2, 100));
@@ -283,6 +293,11 @@ std::uint32_t color_for_load_debug(const Cell& c, int range_min, int range_max) 
                   static_cast<std::uint8_t>(40 + (tc * 120) / 255),
                   static_cast<std::uint8_t>(40 + (tc * 120) / 255),
                   static_cast<std::uint8_t>(46 + (tc * 110) / 255));
+    case CellType::Stone:
+      return argb(255,
+                  static_cast<std::uint8_t>(55 + (t * 130) / 255),
+                  static_cast<std::uint8_t>(42 + (tc * 95) / 255),
+                  static_cast<std::uint8_t>(28 + (tc * 70) / 255));
     case CellType::Sand:
       return argb(255,
                   static_cast<std::uint8_t>(55 + (t * 150) / 255),

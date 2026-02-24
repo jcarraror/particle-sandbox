@@ -20,9 +20,10 @@ struct MaterialProps {
 
 namespace sim {
 
-constexpr std::array<MaterialProps, 8> kMaterialProps{{
+constexpr std::array<MaterialProps, kCellTypeCount> kMaterialProps{{
     /* Empty */ {20, 0, 1, 20, 0},
     /* Wall  */ {20, 3, 10, 20, 0},
+    /* Stone */ {20, 3, 12, 20, 0},
     /* Sand  */ {20, 2, 4, 20, 0},
     /* Water */ {20, 5, 7, 20, 0},
     /* Oil   */ {20, 3, 5, 20, 0},
@@ -31,7 +32,7 @@ constexpr std::array<MaterialProps, 8> kMaterialProps{{
     /* Lava  */ {800, 5, 14, 880, 1},
 }};
 
-static_assert(kMaterialProps.size() == 8);
+static_assert(kMaterialProps.size() == kCellTypeCount);
 
 constexpr const MaterialProps& material_props(CellType t) {
   const std::size_t idx = is_valid_cell_type(t) ? static_cast<std::size_t>(t) : 0u;

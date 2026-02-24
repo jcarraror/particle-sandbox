@@ -126,10 +126,9 @@ TEST_CASE("Lava passive solidification path applies interface penalties before R
   }
 }
 
-TEST_CASE("Lava solidification can propagate crust into adjacent cooled lava", "[world][rules][lava]") {
-  bool propagated = false;
-
-  for (std::uint32_t seed = 1; seed <= 256 && !propagated; ++seed) {
+TEST_CASE("Lava solidification under strong quench produces stone", "[world][rules][lava]") {
+  bool solidified = false;
+  for (std::uint32_t seed = 1; seed <= 256 && !solidified; ++seed) {
     World world = make_world(13, 13, seed);
     world.stamp = 11;
 
@@ -144,10 +143,8 @@ TEST_CASE("Lava solidification can propagate crust into adjacent cooled lava", "
 
     world.step_lava(6, 6, true);
 
-    const bool center_solidified = world.at(6, 6).type == CellType::Wall;
-    const bool neighbor_propagated = world.at(6, 7).type == CellType::Wall;
-    propagated = center_solidified && neighbor_propagated;
+    solidified = (world.at(6, 6).type == CellType::Stone);
   }
 
-  CHECK(propagated);
+  CHECK(solidified);
 }

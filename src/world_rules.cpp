@@ -119,6 +119,51 @@ void for_each_neighbor(World& world, int x, int y, Fn&& fn) {
   }
 }
 
+inline std::int8_t clamp_impulse(int v) {
+  return static_cast<std::int8_t>(clampi(v, -8, 8));
+}
+
+bool is_liquid_cell(CellType t) {
+  return t == CellType::Water || t == CellType::Oil;
+}
+
+void emit_liquid_splash_droplets(World& world, int x, int y, CellType liquid_type) {
+  const int droplet_budget = 3 + static_cast<int>(world.rng.next_u32() % 4u);  // 3..6
+  for (int n = 0; n < droplet_budget; ++n) {
+    const int dir = world.rng.coin() ? -1 : 1;
+    const int lift = 1 + static_cast<int>(world.rng.next_u32() % 2u);    // 1..2
+    const int reach = 1 + static_cast<int>(world.rng.next_u32() % 3u);   // 1..3
+    const std::array<std::pair<int, int>, 3> candidates{{
+        {x + dir, y - 1},
+        {x + dir * reach, y - 1},
+        {x + dir * reach, y - lift},
+    }};
+    bool emitted = false;
+    for (const auto& [tx, ty] : candidates) {
+      if (!world.in_bounds(tx, ty) || !world.in_bounds(tx, ty + 1)) continue;
+      Cell& dst = world.at(tx, ty);
+      if (dst.type != CellType::Empty) continue;
+
+      // Find a source liquid cell near the impact rim.
+      const std::array<std::pair<int, int>, 2> sources{{{x + dir, y}, {x, y}}};
+      for (const auto& [sx, sy] : sources) {
+        if (!world.in_bounds(sx, sy)) continue;
+        Cell& src = world.at(sx, sy);
+        if (src.type != liquid_type) continue;
+
+        std::swap(src, dst);
+        dst.updated = world.stamp;
+        dst.impulse_x = clamp_impulse(static_cast<int>(dst.impulse_x) + ((dir < 0) ? -2 : 2));
+        dst.impulse_y = clamp_impulse(static_cast<int>(dst.impulse_y) - (2 + lift));
+        src.updated = world.stamp;
+        emitted = true;
+        break;
+      }
+      if (emitted) break;
+    }
+  }
+}
+
 void ignite_oil_neighbors(World& world, int x, int y) {
   for_each_neighbor(world, x, y, [&](int, int, Cell& n) {
     if (n.type != CellType::Oil) return;
@@ -168,7 +213,8 @@ bool try_evaporate_water(World& world, int x, int y) {
     const Cell& n = world.at(nx, ny);
     if (n.type == CellType::Lava) ++direct_lava;
     else if (n.type == CellType::Fire) ++direct_fire;
-    else if (n.type == CellType::Wall && n.temp >= simcfg::kHotWallSteamTempThreshold) ++hot_wall;
+    else if ((n.type == CellType::Wall || n.type == CellType::Stone) &&
+             n.temp >= simcfg::kHotWallSteamTempThreshold) ++hot_wall;
   }
   if (direct_lava == 0 && direct_fire == 0 && hot_wall == 0) return false;
 
@@ -240,6 +286,62 @@ bool try_swap_liquid_with_smoke(World& world, int x, int y, int nx, int ny) {
   std::swap(src, dst);
   src.updated = world.stamp;  // displaced smoke should not re-step this tick
   dst.updated = world.stamp;  // moved liquid already consumed its step
+  return true;
+}
+
+bool try_swap_stone_with_fluid(World& world, int x, int y, int nx, int ny) {
+  if (!world.in_bounds(nx, ny)) return false;
+
+  Cell& src = world.at(x, y);
+  Cell& dst = world.at(nx, ny);
+  if (src.type != CellType::Stone) return false;
+  if (dst.type != CellType::Water && dst.type != CellType::Oil && dst.type != CellType::Smoke) return false;
+  const CellType displaced_type = dst.type;
+  const bool vertical_entry = (nx == x && ny == y + 1);
+
+  if (vertical_entry && (displaced_type == CellType::Water || displaced_type == CellType::Oil)) {
+    const std::array<std::pair<int, int>, 4> eject_targets{{{x - 1, y}, {x + 1, y}, {x - 1, y - 1}, {x + 1, y - 1}}};
+    for (const auto& [ex, ey] : eject_targets) {
+      if (!world.in_bounds(ex, ey)) continue;
+      Cell& e = world.at(ex, ey);
+      if (e.type != CellType::Empty) continue;
+
+      Cell stone = src;
+      Cell displaced = dst;
+
+      dst = stone;
+      dst.updated = world.stamp;
+      dst.flow_dir = 0;
+      dst.flow_strength = 0;
+
+      src = Cell{};
+      src.updated = world.stamp;
+
+      e = displaced;
+      e.updated = world.stamp;
+      e.flow_dir = 0;
+      e.flow_strength = 0;
+      if (is_liquid_cell(e.type)) {
+        e.impulse_x = clamp_impulse(static_cast<int>(e.impulse_x) + ((ex < x) ? -2 : 2));
+        e.impulse_y = clamp_impulse(static_cast<int>(e.impulse_y) - ((ey < y) ? 2 : 1));
+        emit_liquid_splash_droplets(world, x, y, e.type);
+      }
+      return true;
+    }
+  }
+
+  std::swap(src, dst);
+  src.updated = world.stamp;
+  dst.updated = world.stamp;
+  dst.flow_dir = 0;
+  dst.flow_strength = 0;
+
+  if (vertical_entry && (displaced_type == CellType::Water || displaced_type == CellType::Oil)) {
+    if (is_liquid_cell(src.type)) {
+      src.impulse_x = clamp_impulse(static_cast<int>(src.impulse_x) + (world.rng.coin() ? 1 : -1));
+      emit_liquid_splash_droplets(world, x, y, src.type);
+    }
+  }
   return true;
 }
 
@@ -340,7 +442,7 @@ int thermal_sink_score_around(World& world, int x, int y, int source_temp) {
     // Water is a strong thermal sink and should still favor crusting.
     if (n.type == CellType::Water) sink += 2;
     // Solid contact (crust/wall) supports interface crust growth.
-    if (n.type == CellType::Wall) sink += 1;
+    if (n.type == CellType::Wall || n.type == CellType::Stone) sink += 1;
 
     score += std::clamp(sink, 0, 4);
   }
@@ -350,7 +452,7 @@ int thermal_sink_score_around(World& world, int x, int y, int source_temp) {
 int count_adjacent_wet_walls(World& world, int x, int y) {
   int count = 0;
   for_each_neighbor(world, x, y, [&](int nx, int ny, Cell& n) {
-    if (n.type != CellType::Wall) return;
+    if (n.type != CellType::Wall && n.type != CellType::Stone) return;
     bool wet = false;
     for_each_neighbor(world, nx, ny, [&](int, int, Cell& m) {
       if (m.type == CellType::Water) wet = true;
@@ -364,7 +466,8 @@ void cool_lava_through_crust(World& world, int x, int y) {
   Cell& c = world.at(x, y);
   if (c.type != CellType::Lava) return;
 
-  const int wall_neighbors = count_adjacent_type(world, x, y, CellType::Wall);
+  const int wall_neighbors =
+      count_adjacent_type(world, x, y, CellType::Wall) + count_adjacent_type(world, x, y, CellType::Stone);
   const int wet_wall_neighbors = count_adjacent_wet_walls(world, x, y);
   if (wall_neighbors == 0) return;
 
@@ -422,7 +525,8 @@ bool try_solidify_lava(World& world, int x, int y, int water_contacts) {
   Cell& c = world.at(x, y);
   if (c.type != CellType::Lava) return false;
 
-  const int adjacent_wall = count_adjacent_type(world, x, y, CellType::Wall);
+  const int adjacent_wall =
+      count_adjacent_type(world, x, y, CellType::Wall) + count_adjacent_type(world, x, y, CellType::Stone);
   const int lava_neighbors = count_adjacent_type(world, x, y, CellType::Lava);
   const int cardinal_lava_neighbors = count_cardinal_adjacent_type(world, x, y, CellType::Lava);
   const int interface_score = thermal_sink_score_around(world, x, y, static_cast<int>(c.temp));
@@ -463,7 +567,7 @@ bool try_solidify_lava(World& world, int x, int y, int water_contacts) {
 
   if ((world.rng.next_u32() % divisor) != 0u) return false;
 
-  c.type = CellType::Wall;
+  c.type = CellType::Stone;
   c.temp = static_cast<std::int16_t>(std::max(simcfg::kAmbientTemp, static_cast<int>(c.temp) / 2));
   c.pressure = 0;
 
@@ -477,7 +581,7 @@ bool try_solidify_lava(World& world, int x, int y, int water_contacts) {
     const int n_cardinal_lava = count_cardinal_adjacent_type(world, nx, ny, CellType::Lava);
     if (n_interface == 0 && n_cardinal_lava >= 4) return;
     if ((world.rng.next_u32() % simcfg::kLavaCrustPropagateOddsDivisor) != 0u) return;
-    n.type = CellType::Wall;
+    n.type = CellType::Stone;
     n.temp = static_cast<std::int16_t>(std::max(simcfg::kAmbientTemp, static_cast<int>(n.temp) / 2));
     n.pressure = 0;
     n.updated = world.stamp;
@@ -506,6 +610,7 @@ void World::step_cell(int x, int y, bool left_to_right) {
   c.updated = stamp;
 
   switch (c.type) {
+    case CellType::Stone: step_stone(x, y, left_to_right); break;
     case CellType::Sand: step_sand(x, y, left_to_right); break;
     case CellType::Water: step_water(x, y, left_to_right); break;
     case CellType::Oil: step_oil(x, y, left_to_right); break;
@@ -535,6 +640,25 @@ void World::step_sand(int x, int y, bool ltr) {
   (void)try_move(x, y, x + dx2, y + 1);
 }
 
+void World::step_stone(int x, int y, bool ltr) {
+  if (try_move(x, y, x, y + 1)) return;
+
+  (void)ltr;
+  const CellType below = at(x, y + 1).type;
+  const bool liquid_below = (below == CellType::Water || below == CellType::Oil || below == CellType::Smoke);
+  if ((rng.next_u32() % 3u) == 0u && try_swap_stone_with_fluid(*this, x, y, x, y + 1)) return;
+
+  if (liquid_below) {
+    // Stone displaces liquid by entering vertically; avoid side/diagonal "particleization" in liquid.
+    (void)try_swap_stone_with_fluid(*this, x, y, x, y + 1);
+    return;
+  }
+
+  // Dry-supported stone behaves as a cohesive rock mass approximation:
+  // it does not keep avalanching into a sand triangle.
+  return;
+}
+
 /**
  * @brief Water rule: absorb heat, evaporate if hot, then flow like a liquid.
  *
@@ -548,10 +672,70 @@ void World::step_water(int x, int y, bool ltr) {
   absorb_heat_from_hot_neighbors(*this, x, y);
   if (try_evaporate_water(*this, x, y)) return;
 
+  Cell& self = at(x, y);
+  const int ix = static_cast<int>(self.impulse_x);
+  const int iy = static_cast<int>(self.impulse_y);
+  const bool surface_like =
+      in_bounds(x, y - 1) && at(x, y - 1).type == CellType::Empty &&
+      (!in_bounds(x, y - 2) || at(x, y - 2).type != CellType::Empty || std::abs(iy) >= 2);
+  const bool droplet_like = (iy <= -3) && (std::abs(ix) >= 1);
+  const bool airborne = in_bounds(x, y + 1) && at(x, y + 1).type == CellType::Empty;
+
+  // Granular splash droplets: temporarily behave like tiny particles, not a connected liquid sheet.
+  if (droplet_like) {
+    const int updx = (ix > 0) ? 1 : -1;
+    // Hard cap splash height: only launch while still near the surface (not already airborne).
+    if (!airborne) {
+      if (iy <= -4) {
+        // Prefer diagonal-up to create discrete spray, then fallback to straight-up.
+        if (try_move(x, y, x + updx, y - 1)) return;
+        if (try_move(x, y, x, y - 1)) return;
+      } else {
+        if (try_move(x, y, x + updx, y - 1)) return;
+        if (try_move(x, y, x, y - 1)) return;
+      }
+    }
+
+    // If blocked near surface, quickly lose droplet identity and rejoin normal liquid behavior.
+    self = at(x, y);
+    if (self.type == CellType::Water) {
+      // Fast decay: droplets arc briefly, then gravity wins and they merge back.
+      self.impulse_y = static_cast<std::int8_t>(std::min<int>(self.impulse_y + (airborne ? 3 : 2), 0));
+      // Kill sideways travel quickly so droplets arc and fall back instead of surfing to walls.
+      self.impulse_x = static_cast<std::int8_t>(self.impulse_x / 3);
+    }
+    return;
+  }
+
+  // Impact response: upward impulse near a surface can create a quick splash rise.
+  if (surface_like && droplet_like && in_bounds(x, y - 1) && at(x, y - 1).type == CellType::Empty) {
+    if (try_move(x, y, x, y - 1)) {
+      Cell& moved = at(x, y - 1);
+      if (moved.type == CellType::Water) {
+        moved.impulse_y = -1;  // retain a little upward identity, but prevent repeated launch
+        moved.impulse_x = static_cast<std::int8_t>((moved.impulse_x * 2) / 3);
+      }
+      return;
+    }
+  }
+  if (surface_like && droplet_like) {
+    const int updx = (ix > 0) ? 1 : (ix < 0 ? -1 : (ltr ? -1 : 1));
+    if (try_move(x, y, x + updx, y - 1)) {
+      Cell& moved = at(x + updx, y - 1);
+      if (moved.type == CellType::Water) {
+        moved.impulse_y = -1;
+        moved.impulse_x = static_cast<std::int8_t>((moved.impulse_x * 2) / 3);
+      }
+      return;
+    }
+  }
+
   if (try_move(x, y, x, y + 1)) return;
   if (try_swap_liquid_with_smoke(*this, x, y, x, y + 1)) return;
 
-  const int dx1 = (ltr ? -1 : 1);
+  const bool suppress_impulse_side_bias = airborne && iy < 0;
+  const int dx1 = suppress_impulse_side_bias ? (ltr ? -1 : 1)
+                                             : (ix > 0) ? 1 : (ix < 0 ? -1 : (ltr ? -1 : 1));
   const int dx2 = -dx1;
 
   if (try_move(x, y, x + dx1, y + 1)) return;
@@ -559,11 +743,21 @@ void World::step_water(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx2, y + 1)) return;
   if (try_swap_liquid_with_smoke(*this, x, y, x + dx2, y + 1)) return;
 
-  const int dir = choose_liquid_spread_dir(*this, x, y, ltr);
+  const int dir = suppress_impulse_side_bias ? choose_liquid_spread_dir(*this, x, y, ltr)
+                                             : (ix > 0) ? 1 : (ix < 0 ? -1 : choose_liquid_spread_dir(*this, x, y, ltr));
 
   const int max_spread = simcfg::kWaterSpread + liquid_pressure_spread_bonus(*this, x, y, ltr);
   for (int i = 1; i <= max_spread; ++i) {
     if (try_move(x, y, x + dir * i, y)) return;
+  }
+
+  // Decay impulses if no movement consumed them this tick.
+  self = at(x, y);
+  if (self.type == CellType::Water) {
+    if (self.impulse_x > 0) --self.impulse_x;
+    else if (self.impulse_x < 0) ++self.impulse_x;
+    if (self.impulse_y > 0) self.impulse_y = static_cast<std::int8_t>(self.impulse_y - 1);
+    else if (self.impulse_y < 0) self.impulse_y = static_cast<std::int8_t>(self.impulse_y + 2);
   }
 }
 

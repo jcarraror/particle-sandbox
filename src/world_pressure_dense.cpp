@@ -1,6 +1,6 @@
 /**
  * @file world_pressure_dense.cpp
- * @brief Dense-material pressure target computation (sand/water/oil/lava).
+ * @brief Dense-material pressure target computation (stone/sand/water/oil/lava).
  */
 
 #include "world_pressure_internal.hpp"
@@ -28,6 +28,14 @@ constexpr int kSandWallSideBonus = 6;
 constexpr int kSandOpenSideRelief = 4;
 constexpr int kSandHeatBonusStep = 100;
 constexpr int kSandHeatBonusAmount = 0;
+
+constexpr int kStoneDepthPressurePerCell = 22;
+constexpr int kStoneColumnLoadPressurePerUnit = 8;
+constexpr int kStoneBlockedBelowBonus = 22;
+constexpr int kStoneWallSideBonus = 10;
+constexpr int kStoneOpenSideRelief = 3;
+constexpr int kStoneHeatBonusStep = 120;
+constexpr int kStoneHeatBonusAmount = 1;
 
 constexpr int kLavaDepthPressurePerCell = 22;
 constexpr int kLavaColumnLoadPressurePerUnit = 10;
@@ -96,7 +104,8 @@ struct DenseRelaxProps {
 // heuristic "load units", not physical masses.
 constexpr std::array<VerticalLoadProps, kCellTypeCount> kVerticalLoadProps{{
     {false, 0},  // Empty
-    {true, 2},   // Wall / crust
+    {true, 2},   // Wall
+    {true, 2},   // Stone
     {true, 2},   // Sand
     {true, 2},   // Water
     {true, 2},   // Oil
@@ -114,7 +123,8 @@ constexpr VerticalLoadProps vertical_load_props(CellType t) noexcept {
 // receive smoothed pressure updates to preserve sandbox liquid motion feel.
 constexpr std::array<DenseRelaxProps, kCellTypeCount> kDenseRelaxProps{{
     {0, 0},  // Empty
-    {3, 2},  // Wall / crust: strong bridge and receives to transmit into lava
+    {3, 2},  // Wall
+    {3, 2},  // Stone: rigid solidified lava
     {2, 2},  // Sand
     {2, 0},  // Water: contributes load but no relaxed writeback
     {2, 0},  // Oil: contributes load but no relaxed writeback
@@ -130,6 +140,7 @@ constexpr DenseRelaxProps dense_relax_props(CellType t) noexcept {
 int dense_load_material_adjust(CellType t) noexcept {
   switch (t) {
     case CellType::Wall: return -kDenseLoadWallTransmitBonus;
+    case CellType::Stone: return -(kDenseLoadWallTransmitBonus - 2);
     case CellType::Lava: return -kDenseLoadLavaTransmitBonus;
     case CellType::Water: return kDenseLoadWaterTransmitPenalty;
     case CellType::Oil: return kDenseLoadOilTransmitPenalty;
@@ -171,6 +182,16 @@ int same_material_overburden_depth(const World& world, int x, int y, CellType ma
 
 DensePressureCoeffs coeffs_for_dense(CellType t) {
   switch (t) {
+    case CellType::Stone:
+      return DensePressureCoeffs{
+          .same_material_depth_per_cell = kStoneDepthPressurePerCell,
+          .overburden_per_unit = kStoneColumnLoadPressurePerUnit,
+          .blocked_below_bonus = kStoneBlockedBelowBonus,
+          .wall_side_bonus = kStoneWallSideBonus,
+          .open_side_relief = kStoneOpenSideRelief,
+          .heat_bonus_step = kStoneHeatBonusStep,
+          .heat_bonus_amount = kStoneHeatBonusAmount,
+      };
     case CellType::Sand:
       return DensePressureCoeffs{
           .same_material_depth_per_cell = kSandDepthPressurePerCell,
@@ -212,7 +233,7 @@ DensePressureCoeffs coeffs_for_dense(CellType t) {
 }  // namespace
 
 bool is_dense_pressure_material(CellType t) noexcept {
-  return t == CellType::Sand || t == CellType::Water || t == CellType::Oil || t == CellType::Lava;
+  return t == CellType::Stone || t == CellType::Sand || t == CellType::Water || t == CellType::Oil || t == CellType::Lava;
 }
 
 int compute_dense_pressure_target(const World& world, int x, int y, const Cell& c) {
@@ -227,7 +248,7 @@ int compute_dense_pressure_target(const World& world, int x, int y, const Cell& 
 
   auto side_pressure = [&](CellType t) {
     if (t == CellType::Empty || t == CellType::Smoke) return -coeffs.open_side_relief;
-    if (t == CellType::Wall) return coeffs.wall_side_bonus;
+    if (t == CellType::Wall || t == CellType::Stone) return coeffs.wall_side_bonus;
     if (coeffs.water_contact_bonus > 0 && t == CellType::Water) return coeffs.water_contact_bonus;
     return 0;
   };
@@ -239,7 +260,8 @@ int compute_dense_pressure_target(const World& world, int x, int y, const Cell& 
   if (coeffs.water_contact_bonus > 0 && (up == CellType::Water || below == CellType::Water)) {
     p += coeffs.water_contact_bonus;
   }
-  if (coeffs.crust_contact_bonus > 0 && (up == CellType::Wall || below == CellType::Wall)) {
+  if (coeffs.crust_contact_bonus > 0 &&
+      (up == CellType::Wall || up == CellType::Stone || below == CellType::Wall || below == CellType::Stone)) {
     p += coeffs.crust_contact_bonus;
   }
 

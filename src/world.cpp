@@ -20,6 +20,8 @@ void sanitize_cell(Cell& c) {
   }
   c.pressure = static_cast<std::int16_t>(std::clamp<int>(c.pressure, 0, 240));
   c.load = static_cast<std::int16_t>(std::max<int>(0, c.load));
+  c.impulse_x = static_cast<std::int8_t>(std::clamp<int>(c.impulse_x, -8, 8));
+  c.impulse_y = static_cast<std::int8_t>(std::clamp<int>(c.impulse_y, -8, 8));
 }
 
 }  // namespace
@@ -161,8 +163,14 @@ bool World::try_move(int x, int y, int nx, int ny) {
     b.flow_dir = 0;
     b.flow_strength = 0;
   }
+  if (b.type != CellType::Water && b.type != CellType::Oil) {
+    b.impulse_x = 0;
+    b.impulse_y = 0;
+  }
   a.flow_dir = 0;
   a.flow_strength = 0;
+  a.impulse_x = 0;
+  a.impulse_y = 0;
   b.updated = stamp;
   return true;
 }
@@ -216,6 +224,8 @@ void World::generate_random_scene() {
     c.load = 0;
     c.flow_dir = 0;
     c.flow_strength = 0;
+    c.impulse_x = 0;
+    c.impulse_y = 0;
     c.updated = stamp;
   };
 
@@ -322,6 +332,8 @@ void World::paint_disc(int cx, int cy, int radius, CellType t) {
       c.load = 0;
       c.flow_dir = 0;
       c.flow_strength = 0;
+      c.impulse_x = 0;
+      c.impulse_y = 0;
     }
   }
 }

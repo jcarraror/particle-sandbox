@@ -19,6 +19,7 @@
 enum class CellType : std::uint8_t {
   Empty = 0, /**< Empty space. */
   Wall,      /**< Static barrier cell. */
+  Stone,     /**< Dense solidified lava product. */
   Sand,      /**< Granular falling solid. */
   Water,     /**< Liquid with short horizontal spread. */
   Oil,       /**< Flammable liquid with wider spread. */
@@ -27,7 +28,7 @@ enum class CellType : std::uint8_t {
   Lava       /**< Dense hot liquid that emits smoke. */
 };
 
-inline constexpr std::size_t kCellTypeCount = 8;
+inline constexpr std::size_t kCellTypeCount = 9;
 
 constexpr bool is_valid_cell_type(CellType t) noexcept {
   return static_cast<std::size_t>(t) < kCellTypeCount;
@@ -44,6 +45,8 @@ struct Cell {
   std::int16_t load{0};           /**< Dense structural load heuristic field. */
   std::int8_t flow_dir{0};        /**< horizontal flow memory (-1,0,+1) used by viscous materials. */
   std::int8_t flow_strength{0};   /**< Persistence magnitude for `flow_dir` (0..4). */
+  std::int8_t impulse_x{0};       /**< horizontal impulse*/
+  std::int8_t impulse_y{0};       /**< vertical impulse (negative = upward). */
 };
 
 /**
@@ -183,6 +186,8 @@ private:
 
   /** @brief Updates sand behavior for one cell. */
   void step_sand(int x, int y, bool ltr);
+  /** @brief Updates stone behavior for one cell. */
+  void step_stone(int x, int y, bool ltr);
 
   /** @brief Updates water behavior for one cell. */
   void step_water(int x, int y, bool ltr);
