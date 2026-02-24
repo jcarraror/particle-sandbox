@@ -57,10 +57,10 @@ TEST_CASE("World tick repairs invalid cells and resizes thermal impulse buffer",
   c.pressure = 999;
   c.load = -50;
 
-  world.tick();
+  for (int i = 0; i < 8; ++i) world.tick();
 
   CHECK(world.thermal_impulses.size() == world.cells.size());
-  CHECK(world.tick_count == 1);
+  CHECK(world.tick_count == 8);
 
   const Cell& repaired = world.at(5, 5);
   CHECK(repaired.type == CellType::Empty);

@@ -145,6 +145,24 @@ bool World::try_move(int x, int y, int nx, int ny) {
 
   std::swap(a, b);
 
+  if (b.type == CellType::Lava) {
+    const int dx = nx - x;
+    if (dx > 0 || dx < 0) {
+      const std::int8_t new_dir = (dx > 0) ? 1 : -1;
+      if (b.flow_dir == new_dir) b.flow_strength = static_cast<std::int8_t>(std::min<int>(4, b.flow_strength + 1));
+      else b.flow_strength = 1;
+      b.flow_dir = new_dir;
+    } else if (ny != y) {
+      // vertical settling preserves some lateral momentum but decays it.
+      if (b.flow_strength > 0) --b.flow_strength;
+      if (b.flow_strength == 0) b.flow_dir = 0;
+    }
+  } else {
+    b.flow_dir = 0;
+    b.flow_strength = 0;
+  }
+  a.flow_dir = 0;
+  a.flow_strength = 0;
   b.updated = stamp;
   return true;
 }
@@ -196,6 +214,8 @@ void World::generate_random_scene() {
     c.temp = sim::material_props(t).spawn_temp;
     c.pressure = 0;
     c.load = 0;
+    c.flow_dir = 0;
+    c.flow_strength = 0;
     c.updated = stamp;
   };
 
@@ -300,6 +320,8 @@ void World::paint_disc(int cx, int cy, int radius, CellType t) {
       c.temp = sim::material_props(t).spawn_temp;
       c.pressure = 0;
       c.load = 0;
+      c.flow_dir = 0;
+      c.flow_strength = 0;
     }
   }
 }

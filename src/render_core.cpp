@@ -79,6 +79,15 @@ constexpr PressureDebugStyle pressure_debug_style(CellType t) noexcept {
   return kPressureDebugStyles[static_cast<std::size_t>(t)];
 }
 
+constexpr std::uint8_t clamp_u8(int v) noexcept {
+  return static_cast<std::uint8_t>(std::clamp(v, 0, 255));
+}
+
+constexpr std::uint8_t triangle8(std::uint32_t phase) noexcept {
+  const std::uint32_t p = phase & 0xFFu;
+  return static_cast<std::uint8_t>((p < 128u) ? (p * 2u) : ((255u - p) * 2u));
+}
+
 }  // namespace
 
 namespace render_core {
@@ -144,6 +153,43 @@ std::uint32_t color_for_cell(const Cell& c) noexcept {
       return argb(255, static_cast<std::uint8_t>(style.r + h),
                   static_cast<std::uint8_t>(style.g + h / 2), style.b);
   }
+}
+
+std::uint32_t color_for_cell_animated(const Cell& c, int x, int y, std::uint64_t tick) noexcept {
+  if (c.type != CellType::Lava) return color_for_cell(c);
+
+  auto heat = [](int t) -> std::uint8_t {
+    int v = (t - 20) / 4;
+    v = (v < 0) ? 0 : (v > 60 ? 60 : v);
+    return static_cast<std::uint8_t>(v);
+  };
+
+  const MaterialColorStyle style = material_color_style(c.type);
+  const std::uint8_t h = heat(c.temp);
+  const int flow_dir = static_cast<int>(c.flow_dir);
+  const int flow_strength = std::clamp<int>(static_cast<int>(c.flow_strength), 0, 4);
+
+  const int dir_bias = (flow_dir == 0) ? 2 : (flow_dir > 0 ? 5 : -5);
+  const std::uint32_t fold_phase = static_cast<std::uint32_t>((tick * 3u) + (x * dir_bias) + (y * 7) +
+                                                              (flow_strength * 13));
+  const std::uint32_t pulse_phase =
+      static_cast<std::uint32_t>((tick * static_cast<std::uint64_t>(4 + flow_strength)) + (x * 17) - (y * 11) +
+                                 (flow_dir * 19));
+  const int fold = static_cast<int>(triangle8(fold_phase));   // 0..254
+  const int pulse = static_cast<int>(triangle8(pulse_phase)); // 0..254
+
+  const int mobility = std::clamp((static_cast<int>(c.temp) - 180) / 18, 0, 40);
+  const int flop_amp = 8 + (mobility / 2) + (flow_strength * 4);
+  const int pulse_amp = 4 + (mobility / 6) + (flow_strength * 2);
+  const int fold_signed = ((fold - 127) * flop_amp) / 127;
+  const int pulse_signed = ((pulse - 127) * pulse_amp) / 127;
+  const int bright = std::max(0, fold_signed) + std::max(0, pulse_signed / 2);
+  const int dark = std::max(0, -fold_signed / 2) + std::max(0, -pulse_signed / 3);
+
+  return argb(255,
+              clamp_u8(static_cast<int>(style.r) + h + bright - dark / 2),
+              clamp_u8(static_cast<int>(style.g) + (h / 2) + bright / 2 - dark / 3),
+              clamp_u8(static_cast<int>(style.b) + std::max(0, pulse_signed / 3)));
 }
 
 std::uint32_t color_for_pressure_debug(const Cell& c) noexcept {

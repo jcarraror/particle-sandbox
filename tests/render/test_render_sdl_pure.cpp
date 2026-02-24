@@ -107,6 +107,27 @@ TEST_CASE("render_core color mapping covers all material display models", "[rend
   CHECK(render_core::color_for_cell(invalid) != 0u);
 }
 
+TEST_CASE("render_core animated lava color varies over time while static materials stay stable", "[render][core][anim]") {
+  Cell lava{};
+  lava.type = CellType::Lava;
+  lava.temp = 900;
+  lava.flow_dir = 1;
+  lava.flow_strength = 3;
+
+  const auto lava_t0 = render_core::color_for_cell_animated(lava, 10, 12, 0);
+  const auto lava_t1 = render_core::color_for_cell_animated(lava, 10, 12, 9);
+  CHECK(lava_t0 != 0u);
+  CHECK(lava_t1 != 0u);
+  CHECK(lava_t0 != lava_t1);
+
+  Cell sand{};
+  sand.type = CellType::Sand;
+  sand.temp = 80;
+  const auto sand_static = render_core::color_for_cell(sand);
+  CHECK(render_core::color_for_cell_animated(sand, 3, 4, 0) == sand_static);
+  CHECK(render_core::color_for_cell_animated(sand, 3, 4, 25) == sand_static);
+}
+
 TEST_CASE("render_core debug color mapping handles pressure and load variants", "[render][core][debug]") {
   for (std::size_t i = 0; i < kCellTypeCount; ++i) {
     Cell c{};

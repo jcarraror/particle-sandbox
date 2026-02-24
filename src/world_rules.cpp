@@ -60,6 +60,17 @@ constexpr std::uint32_t kLavaCrustPropagateOddsDivisor = 6;
 constexpr int kLavaPassiveSolidifyTempThreshold = 90;
 constexpr std::uint32_t kLavaPassiveSolidifyOddsDivisor = 120;
 constexpr std::uint32_t kLavaPassiveSolidifyNearWallOddsDivisor = 36;
+constexpr int kLavaLateralFlowLowTemp = 220;
+constexpr int kLavaLateralFlowMidTemp = 420;
+constexpr int kLavaLateralFlowHighTemp = 720;
+constexpr int kLavaLateralFlowVeryHighTemp = 950;
+constexpr int kLavaMomentumAssistTemp = 380;
+constexpr std::uint32_t kLavaLateralOddsCool = 9;
+constexpr std::uint32_t kLavaLateralOddsWarm = 5;
+constexpr std::uint32_t kLavaLateralOddsHot = 3;
+constexpr std::uint32_t kLavaLateralOddsVeryHot = 1;
+constexpr int kLavaSupportedFlowTempThreshold = 520;
+constexpr int kLavaPressureFlowThreshold = 120;
 constexpr int kWaterHeatAbsorbFromFire = 16;
 constexpr int kWaterHeatAbsorbFromLava = 10;
 constexpr int kWaterSteamTempThreshold = 140;
@@ -737,8 +748,76 @@ void World::step_lava(int x, int y, bool ltr) {
   if (try_move(x, y, x + dx2, y + 1)) return;
   if (try_swap_liquid_with_smoke(*this, x, y, x + dx2, y + 1)) return;
 
-  if (rng.coin()) (void)try_move(x, y, x + dx1, y);
-  else (void)try_move(x, y, x + dx2, y);
+  Cell& lava = at(x, y);
+  const int lava_temp = static_cast<int>(lava.temp);
+  const CellType below = at(x, y + 1).type;
+  const bool supported = (below != CellType::Empty && below != CellType::Smoke);
+  const bool exposed_surface = in_bounds(x, y - 1) && at(x, y - 1).type == CellType::Empty;
+
+  if (supported &&
+      !exposed_surface &&
+      lava_temp < simcfg::kLavaSupportedFlowTempThreshold &&
+      lava.pressure < simcfg::kLavaPressureFlowThreshold) {
+    if (lava.flow_strength > 0) --lava.flow_strength;
+    // Pooled/cooling lava behaves more like a yield fluid than a diffusing liquid.
+    if (lava.flow_strength == 0) lava.flow_dir = 0;
+  } else {
+    std::uint32_t lateral_divisor = simcfg::kLavaLateralOddsCool;
+    if (lava_temp >= simcfg::kLavaLateralFlowVeryHighTemp) lateral_divisor = simcfg::kLavaLateralOddsVeryHot;
+    else if (lava_temp >= simcfg::kLavaLateralFlowHighTemp) lateral_divisor = simcfg::kLavaLateralOddsHot;
+    else if (lava_temp >= simcfg::kLavaLateralFlowMidTemp) lateral_divisor = simcfg::kLavaLateralOddsWarm;
+
+    // Cooler lava should not laterally diffuse every tick; hot lava remains mobile.
+    if (lava_temp >= simcfg::kLavaLateralFlowLowTemp &&
+        (lateral_divisor <= 1u || (rng.next_u32() % lateral_divisor) == 0u)) {
+      const bool very_hot = lava_temp >= simcfg::kLavaLateralFlowVeryHighTemp;
+      const bool momentum_active = lava.flow_strength >= 2 && lava_temp >= simcfg::kLavaMomentumAssistTemp;
+      auto lateral_drop_score = [&](int dir) {
+        int score = 0;
+        const int nx = x + dir;
+        if (!in_bounds(nx, y)) return -999;
+        const CellType side = at(nx, y).type;
+        const CellType side_down = at(nx, y + 1).type;
+        if (side == CellType::Empty) score += 2;
+        else if (side == CellType::Smoke) score += 1;
+        else score -= 2;
+        if (side_down == CellType::Empty) score += 4;
+        else if (side_down == CellType::Smoke) score += 2;
+
+        if (very_hot && in_bounds(x + 2 * dir, y + 1)) {
+          const CellType far_down = at(x + 2 * dir, y + 1).type;
+          if (far_down == CellType::Empty) score += 2;
+        }
+        return score;
+      };
+
+      int preferred_dir = (lava.flow_dir > 0) ? 1 : (lava.flow_dir < 0 ? -1 : 0);
+      const int score1 = lateral_drop_score(dx1);
+      const int score2 = lateral_drop_score(dx2);
+      if (score1 != score2) preferred_dir = (score1 > score2) ? dx1 : dx2;
+      if (preferred_dir == 0) preferred_dir = rng.coin() ? dx1 : dx2;
+      const int first = preferred_dir;
+      const int second = -first;
+
+      if (try_move(x, y, x + first, y)) return;
+      if (momentum_active) {
+        if (try_move(x, y, x + first, y + 1)) return;
+        if (try_swap_liquid_with_smoke(*this, x, y, x + first, y + 1)) return;
+      }
+      if (very_hot) {
+        if (try_move(x, y, x + 2 * first, y)) return;
+      }
+      if (!try_move(x, y, x + second, y)) {
+        // If supported and blocked sideways, cool lava loses flow memory faster.
+        if (lava_temp < simcfg::kLavaLateralFlowMidTemp || lava.flow_strength <= 1) {
+          lava.flow_dir = 0;
+          lava.flow_strength = 0;
+        } else {
+          --lava.flow_strength;
+        }
+      }
+    }
+  }
 
   if ((rng.next_u32() % simcfg::kLavaSmokeSpawnOddsDivisor) == 0u) {
     if (in_bounds(x, y - 1) && at(x, y - 1).type == CellType::Empty) {

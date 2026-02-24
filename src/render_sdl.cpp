@@ -502,7 +502,7 @@ void RendererSDL::draw(const World& world,
       pixels[static_cast<std::size_t>(y * grid_w + x)] =
           show_pressure_debug ? render_core::color_for_pressure_debug(c)
                               : show_load_debug ? render_core::color_for_load_debug(c, load_range_min, load_range_max)
-                                                : render_core::color_for_cell(c);
+                                                : render_core::color_for_cell_animated(c, x, y, world.tick_count);
     }
   }
   SDL_UpdateTexture(texture, nullptr, pixels.data(), grid_w * int(sizeof(std::uint32_t)));

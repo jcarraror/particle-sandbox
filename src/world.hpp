@@ -42,6 +42,8 @@ struct Cell {
   std::int16_t temp{20};          /**< Approximate temperature in arbitrary units. */
   std::int16_t pressure{0};       /**< Local pressure heuristic field. */
   std::int16_t load{0};           /**< Dense structural load heuristic field. */
+  std::int8_t flow_dir{0};        /**< horizontal flow memory (-1,0,+1) used by viscous materials. */
+  std::int8_t flow_strength{0};   /**< Persistence magnitude for `flow_dir` (0..4). */
 };
 
 /**
